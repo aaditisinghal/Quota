@@ -7,7 +7,7 @@ name = "quota"
 version = "0.1.0"
 description = "Quota: an agent-run commissions desk with an append-only, hash-chained ledger."
 requires-python = ">=3.11"
-dependencies = ["pyyaml", "pytest", "anthropic", "stripe"]
+dependencies = ["pyyaml", "pytest", "anthropic", "stripe", "fastapi", "uvicorn", "httpx"]
 
 [tool.setuptools.packages.find]
 include = ["quota*"]
@@ -15,6 +15,7 @@ include = ["quota*"]
 [tool.setuptools.package-data]
 "quota.ledger" = ["schema.sql"]
 "quota.sim" = ["acme_script.yaml"]
+"quota.api" = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

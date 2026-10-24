@@ -190,6 +190,7 @@ class World:
         self.wp = WritePath(self.conn, self.clock, principals or config.principals(with_seed=True))
         self.out = out
         self.lines: list[str] = []
+        self.feed: list[dict] = []           # the same lines as objects (seq, clock, actor, kind, text) for the API
         self.queue = ClockRunner(self.ro, self.wp, self.clock, self.emit)
         self.api = PeopleAPI(self)
         self.records = RecordsSystem(self)
@@ -200,6 +201,8 @@ class World:
     def emit(self, actor, kind, text):
         line = format_line(self.clock.now(), actor, kind, text)
         self.lines.append(line)
+        self.feed.append({"seq": len(self.feed) + 1, "clock": self.clock.now(), "actor": actor, "kind": kind,
+                          "text": text})
         self.out(line)
 
     def say(self, text=""):

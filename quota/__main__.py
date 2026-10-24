@@ -96,6 +96,30 @@ def cmd_eval(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    import uvicorn
+    from quota.api import session as sessions
+    from quota.api.app import create_app
+    from quota.sim.stripe_billing import StripeSandboxError
+    try:
+        stripe = _sandbox(args, f"quota-serve-{args.world}")
+    except StripeSandboxError as exc:
+        print(f"--stripe: {exc}")
+        return 2
+    llm = None
+    if args.live:
+        from quota.agent.llm import LLM
+        llm = LLM()
+    print(f"Building the {args.world} world ...")
+    if args.world == "acme":
+        session = sessions.acme_session("live" if args.live else "scripted", llm, stripe)
+    else:
+        session = sessions.fernhill_session(args.seed, args.reps, stripe)
+    print(f"Clock at {session.world.clock.now()}; serving on http://{args.host}:{args.port}")
+    uvicorn.run(create_app(session, runs_dir=args.runs), host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m quota")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -133,6 +157,18 @@ def main(argv=None) -> int:
     evaluate.add_argument("--stripe", action="store_true",
                           help="run billing in a Stripe sandbox with test clocks (STRIPE_API_KEY; takes minutes)")
     evaluate.set_defaults(fn=cmd_eval)
+
+    serve = sub.add_parser("serve", help="serve the API and screens over one running world")
+    serve.add_argument("--world", choices=["acme", "fernhill"], default="acme")
+    serve.add_argument("--seed", type=int, default=7, help="fernhill only")
+    serve.add_argument("--reps", type=int, default=20, help="fernhill only")
+    serve.add_argument("--live", action="store_true",
+                       help="read chat with the model and parse injected text with it (ANTHROPIC_API_KEY)")
+    serve.add_argument("--stripe", action="store_true", help="billing in a Stripe sandbox (STRIPE_API_KEY)")
+    serve.add_argument("--runs", default="runs", help="where /scorecard finds or writes runs/seed-N/scorecard.json")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.set_defaults(fn=cmd_serve)
 
     from quota.env import load_env
     load_env()

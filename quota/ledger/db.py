@@ -16,7 +16,9 @@ def connect(path: str, readonly: bool = False) -> sqlite3.Connection:
         uri = path
     else:
         uri = Path(path).resolve().as_uri() + ("?mode=ro" if readonly else "")
-    conn = sqlite3.connect(uri, uri=True)
+    # The API serves one world from a thread pool and serializes every call with a lock, so connections may be
+    # used from a thread other than the one that opened them.
+    conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if readonly:

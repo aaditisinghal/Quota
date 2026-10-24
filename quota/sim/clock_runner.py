@@ -5,6 +5,7 @@ so the ledger never knows about something before it happens. Timer sources (e.g.
 09:00Z") are asked fresh every time, so a timer whose reason went away never fires.
 """
 
+import itertools
 import json
 
 from quota.ledger import queries
@@ -22,14 +23,24 @@ class ClockRunner:
         self.ro, self.wp, self.clock = ro, wp, clock
         self.emit = emit
         self._scheduled: list[tuple[str, int, ev.Event]] = []
+        self._order = itertools.count()
         self._timer_sources = []
 
     # ---------- inputs ----------
 
     def schedule(self, at: str, event_type: str, payload: dict) -> None:
         """A future world event; validated now, appended to the ledger when the clock reaches `at`."""
-        self._scheduled.append((at, len(self._scheduled), ev.make(event_type, payload, at)))
+        self._scheduled.append((at, next(self._order), ev.make(event_type, payload, at)))
         self._scheduled.sort()
+
+    def unschedule(self, types) -> list[ev.Event]:
+        """Take not-yet-released events of these types off the calendar (the API lets a person inject them)."""
+        taken = [e for _, _, e in self._scheduled if e.type in types]
+        self._scheduled = [item for item in self._scheduled if item[2].type not in types]
+        return taken
+
+    def upcoming(self) -> list[ev.Event]:
+        return [e for _, _, e in self._scheduled]
 
     def add_timer_source(self, source) -> None:
         """source(now) -> [(at, event_type, payload)] for events that should exist once the clock reaches at."""

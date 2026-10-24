@@ -1,0 +1,79 @@
+"""FastAPI over one running world (section 14). Read-only except the three action endpoints, which are added
+in `actions.py`. The built front end, when present, is served from `static/` at `/`."""
+
+import json
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
+
+from quota.api import views
+
+STATIC = Path(__file__).with_name("static")
+
+
+def scorecard(seed: int, runs_dir: Path) -> dict:
+    """The eval's own output for this seed: runs/seed-N/scorecard.json, produced by running the eval once if
+    it is not there yet (about 20 seconds without Stripe)."""
+    path = runs_dir / f"seed-{seed}" / "scorecard.json"
+    if not path.exists():
+        from quota.eval import run_eval
+        run_eval(seed, out_dir=path.parent)
+    return {"seed": seed, "source": str(path), **json.loads(path.read_text(encoding="utf-8"))}
+
+
+def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
+    app = FastAPI(title="Quota", version="0.4")
+    app.state.session = session
+    runs = Path(runs_dir)
+
+    @app.get("/state")
+    def state():
+        with session.lock:
+            return session.state()
+
+    @app.get("/timeline")
+    def timeline(since: int = Query(0, ge=0)):
+        with session.lock:
+            return {"clock": session.world.clock.now(), "items": views.timeline(session.world, since)}
+
+    @app.get("/trace/{kind}/{object_id}")
+    def trace(kind: str, object_id: str, as_of: str | None = None, depth: int = Query(3, ge=0, le=6)):
+        with session.lock:
+            try:
+                graph = views.trace(session.ro, kind, object_id, as_of, depth)
+            except KeyError as exc:
+                raise HTTPException(404, str(exc))
+        if not graph["known"] and as_of is None:
+            raise HTTPException(404, f"no {kind} {object_id}")
+        return graph
+
+    @app.get("/trace/{object_id}")
+    def trace_by_id(object_id: str, as_of: str | None = None, depth: int = Query(3, ge=0, le=6)):
+        kind = views.kind_of(object_id)
+        if kind is None:
+            raise HTTPException(404, f"cannot tell what {object_id} is")
+        return trace(kind, object_id, as_of, depth)
+
+    @app.get("/ledger/health")
+    def health():
+        with session.lock:
+            return views.health(session.world)
+
+    @app.get("/today")
+    def today():
+        with session.lock:
+            return views.today(session.world)
+
+    @app.get("/messages")
+    def messages(principal: str | None = None):
+        with session.lock:
+            return session.messages(principal)
+
+    @app.get("/scorecard")
+    def get_scorecard(seed: int = 7):
+        return scorecard(seed, runs)
+
+    if Path(static_dir).joinpath("index.html").exists():
+        app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    return app
