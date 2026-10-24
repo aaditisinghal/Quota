@@ -196,7 +196,7 @@ def input_refs(rows: dict[str, list[dict]]) -> list[dict]:
 
 # ---------- replay ----------
 
-def _recompute(fn, rows, decision) -> dict:
+def _recompute(fn, rows, decision, stored_args) -> dict:
     from quota.engine import calculator, disputes, entries
     subject, now = decision["subject_id"], decision["known_at"]
     if fn == "calc_commission":
@@ -207,7 +207,18 @@ def _recompute(fn, rows, decision) -> dict:
     if fn == "clawback_entry":
         return entries.clawback_decision(rows, subject, now)["output"]
     if fn == "evaluate_dispute":
-        return disputes.dispute_decision(rows, subject, now)["output"]
+        claim = stored_args["claim"]
+        message = rows["messages"][0]
+        if claim.get("quote") and claim["quote"] not in message["text"]:
+            return {"error": f"claim quote is not in {message['id']}"}
+        return disputes.dispute_decision(rows, subject, now, claim=claim)["output"]
+    if fn == "has_authority":
+        from quota.agent.extract import has_authority, verify_claim
+        from quota.engine import routing
+        claim = verify_claim(stored_args["claim"], rows["messages"][0]["text"])
+        return {"fn": fn, "args": stored_args,
+                "result": {"authorized": has_authority(claim, stored_args["author"]),
+                           "routed_to": routing.owner("plan_exception")}}
     raise ValueError(f"no replay for fn {fn!r}")
 
 
@@ -225,7 +236,7 @@ def replay_decision(conn, decision_id) -> tuple[bool, dict, dict]:
             return False, stored, {"error": f"input {ref['table']}:{ref['id']} v{ref.get('version')} "
                                             "is missing or altered"}
         rows.setdefault(ref["table"], []).append(row)
-    recomputed = json.loads(json.dumps(_recompute(stored["fn"], rows, decision)))
+    recomputed = json.loads(json.dumps(_recompute(stored["fn"], rows, decision, stored["args"])))
     return recomputed == stored, stored, recomputed
 
 

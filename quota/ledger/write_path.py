@@ -17,8 +17,9 @@ FACT_TABLES = {"people", "deals", "contracts", "esign_events", "plans", "billing
                "precedents"}
 FACT_CAPABILITY = {"billing": "post:source_entry", "events": "emit:event"}   # all other fact tables: write:fact
 LINE_STATUS_CAPABILITY = {
-    "superseded": "draft:commission_line", "clawed_back": "draft:commission_line",
-    "approved": "approve:journal_entry", "paid": "release:payroll_file",
+    "superseded": ("draft:commission_line",), "clawed_back": ("draft:commission_line",),
+    # A seat may mark a line approved only once the Controller approved a posted entry for it (checked below).
+    "approved": ("approve:journal_entry", "draft:journal_entry"), "paid": ("release:payroll_file",),
 }
 ID_PREFIX = {"journal_entries": "JE", "decisions": "D", "approvals": "A", "commission_lines": "CL",
              "precedents": "P", "refusals": "R", "events": "EV", "messages": "M",
@@ -240,12 +241,29 @@ class WritePath:
                                                     "known_at": self.clock.now()})
         return line_id
 
+    def _line_entry_approved(self, line) -> bool:
+        """A posted entry for this line (by the line's decision, or a decision about the line) whose
+        journal_entry approval chain is satisfied."""
+        decision_ids = {line["decision_id"]} | {d["id"] for d in queries.fetch_all(
+            self.conn, "SELECT id FROM decisions WHERE subject_id = ?", (line["id"],))}
+        marks = ", ".join("?" * len(decision_ids))
+        for entry in queries.fetch_all(self.conn, f"SELECT id FROM journal_entries WHERE decision_id IN ({marks})",
+                                       tuple(decision_ids)):
+            if (queries.je_status(self.conn, entry["id"]) == "posted"
+                    and queries.satisfied_approval(self.conn, "journal_entry", entry["id"], self.clock.now())):
+                return True
+        return False
+
     def set_line_status(self, actor, line_id, status) -> None:
         if status not in LINE_STATUS_CAPABILITY:
             raise ValueError(f"unknown line status {status}")
-        if queries.as_of(self.conn, "commission_lines", line_id, None) is None:
+        line = queries.as_of(self.conn, "commission_lines", line_id, None)
+        if line is None:
             raise KeyError(f"unknown commission line {line_id}")
-        codes = self._codes(actor, LINE_STATUS_CAPABILITY[status])
+        codes = self._codes(actor, *LINE_STATUS_CAPABILITY[status])
+        if (status == "approved" and not self._can(actor, "approve:journal_entry")
+                and not self._line_entry_approved(line)):
+            codes.append("INV5_NOT_APPROVED")
         self._check(actor, "set_line_status", line_id, codes, f"{line_id} -> {status}")
         with self.conn:
             self._insert("commission_line_status", {"line_id": line_id, "status": status, "actor": actor,
@@ -342,7 +360,8 @@ class WritePath:
     # ---------- precedents ----------
 
     def add_precedent(self, actor, statement, scope, override, approval_ids, effective_from, expires_at) -> str:
-        codes = self._codes(actor, "approve:plan_exception")
+        # The authority is the satisfied approval chain; an approver or a seat recording decisions may write it down.
+        codes = self._codes(actor, "approve:plan_exception", "record:decision")
         if not queries.approvals_form_satisfied_chain(self.conn, approval_ids, self.clock.now()):
             codes.append("INV5_NOT_APPROVED")
         self._check(actor, "add_precedent", ",".join(approval_ids), codes, statement)

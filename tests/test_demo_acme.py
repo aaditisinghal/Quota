@@ -87,7 +87,9 @@ def test_demo_ids_and_amounts(acme_demo):
     assert {c for _, c in json.loads(schedule["schedule_json"])} == {50_000}
     assert _get(acme_demo, "amortization_schedules", "AS-0001-c")["status"] == "cancelled"
     assert _get(acme_demo, "payroll_files", "PR-2026-05")["total_cents"] == 1_800_000
-    assert _get(acme_demo, "events", "EV-0001")["type"] == "customer.churned"
+    churn = queries.fetch_all(acme_demo.ro, "SELECT * FROM events WHERE type = 'customer.churned'")
+    assert [(e["release_at"], json.loads(e["payload_json"])["refund_cents"]) for e in churn] == [
+        ("2026-06-28T17:00:00Z", 9_000_000)]
 
 
 def test_demo_output_lines(acme_demo):

@@ -45,9 +45,14 @@ def _prior_value(prior_decision, field):
 
 
 def _matches(field, resolved, asserted) -> bool:
-    if field == "booking_date":
-        return resolved is not None and str(resolved)[:10] == str(asserted)[:10]
+    if field == "booking_date":   # asserted may be a day (2026-03-31) or a month (2026-03)
+        return resolved is not None and asserted is not None and str(resolved).startswith(str(asserted))
     return resolved == asserted
+
+
+def asserted_booking_ts(asserted: str) -> str:
+    """A claimed booking date as a timestamp; a month means its last day."""
+    return clk.end_of_day(clk.period_end(asserted) if len(asserted) == 7 else asserted)
 
 
 def _evidence(res: ranking.Resolution, no_new: bool, prior_id: str | None) -> str:
@@ -109,25 +114,27 @@ def render_reply(fields: dict) -> str:
 
 # ---------- decision from fact rows (used by the seat and by replay) ----------
 
-def dispute_decision(rows, line_id, now) -> dict:
-    """rows carry the line, the claim message, the prior decision and the commission facts."""
+def dispute_decision(rows, line_id, now, claim=None) -> dict:
+    """rows carry the line, the claim message, the prior decision and the commission facts. `claim` is the
+    verified extraction (Phase 2); without it the claim is read from the message (Phase 1)."""
     line = calculator.latest_by_id(rows.get("commission_lines"))[line_id]
     message = rows["messages"][0]
     prior = rows["decisions"][0]
-    claim = dict(_loads(message["claim_json"]))
+    given = dict(claim if claim is not None else _loads(message["claim_json"]))
+    claim = dict(given)
     if claim.get("kind") == "escalate" and prior["kind"] == "dispute":
         claim = {**json.loads(prior["output_json"])["args"]["claim"], "kind": "escalate"}
     deal = calculator.latest_by_id(rows.get("deals"))[line["deal_id"]]
     claim.setdefault("deal_name", deal["account"])
     resolved = calculator.resolve_deal(rows, deal, line["rep_id"], now)
-    asserted_ts = clk.end_of_day(claim["asserted"]) if claim["field"] == "booking_date" else None
+    asserted_ts = asserted_booking_ts(claim["asserted"]) if claim["field"] == "booking_date" else None
     at_claim = calculator.evaluate(rows, line["deal_id"], line["rep_id"], now, booking_ts=asserted_ts,
                                    base_cents=claim["asserted"] if claim["field"] == "base" else None)
     at_resolved = calculator.evaluate(rows, line["deal_id"], line["rep_id"], now)
     result = evaluate_dispute(claim, prior, resolved, at_claim, at_resolved)
     output = {
         "fn": "evaluate_dispute",
-        "args": {"claim": claim, "line_id": line_id, "message_id": message["id"], "prior_decision_id": prior["id"]},
+        "args": {"claim": given, "line_id": line_id, "message_id": message["id"], "prior_decision_id": prior["id"]},
         "result": asdict(result),
     }
     return {"output": output, "outcome": result, "claim": claim,

@@ -62,6 +62,8 @@ def main(argv=None) -> int:
     demo = sub.add_parser("demo", help="run a scripted demo world")
     demo.add_argument("world", choices=["acme"])
     demo.add_argument("--db", help="write the ledger to this file (default: in-memory)")
+    demo.add_argument("--scripted", action="store_true", default=True,
+                      help="people and extractions come from the demo script; no model calls (default)")
     demo.set_defaults(fn=cmd_demo)
 
     verify = sub.add_parser("verify", help="chain verify + all invariants")
