@@ -21,17 +21,18 @@ def _human(name, title, capabilities, limit=None):
 
 
 PRINCIPALS = {
+    # claim:event (Phase 2) lets an actor mark an event it picked up from the queue as handled.
     "seat:commissions_analyst": {
         "kind": "agent seat", "limit": None,
         "capabilities": frozenset({"read:*", "draft:commission_line", "draft:approval_request",
-                                   "draft:message", "draft:payroll_file", "record:decision"}),
+                                   "draft:message", "draft:payroll_file", "record:decision", "claim:event"}),
     },
     "seat:deferred_accountant": {
         "kind": "agent seat", "limit": None,
-        "capabilities": frozenset({"read:*", "draft:journal_entry", "record:decision"}),
+        "capabilities": frozenset({"read:*", "draft:journal_entry", "record:decision", "claim:event"}),
     },
     "system:billing": {"kind": "simulated ERP", "limit": None,
-                       "capabilities": frozenset({"post:source_entry"})},
+                       "capabilities": frozenset({"post:source_entry", "claim:event"})},
     "system": {"kind": "simulator", "limit": None, "capabilities": frozenset({"emit:event"})},
     "priya.nair": _human("Priya Nair", "Controller",
                          {"approve:plan_exception", "approve:journal_entry", "approve:payroll_file",

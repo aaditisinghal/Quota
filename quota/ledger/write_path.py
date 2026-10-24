@@ -161,6 +161,21 @@ class WritePath:
         with self.conn:
             return self._insert(table, row)
 
+    def mark_event(self, actor, event_id, status) -> None:
+        """Record that `actor` picked up an event: handled, or ignored as not its business."""
+        if status not in ("handled", "ignored"):
+            raise ValueError(f"event status must be handled or ignored, not {status}")
+        event = queries.as_of(self.conn, "events", event_id, None)
+        if event is None:
+            raise KeyError(f"unknown event {event_id}")
+        codes = self._codes(actor, "claim:event")
+        if event["release_at"] > self.clock.now():
+            codes.append("EVENT_NOT_RELEASED")
+        self._check(actor, "mark_event", event_id, codes, f"{event['type']} released at {event['release_at']}")
+        with self.conn:
+            self._insert("event_status", {"event_id": event_id, "status": status, "actor": actor,
+                                          "known_at": self.clock.now()})
+
     def add_message(self, channel, author, to_principal, text, claim: dict | None) -> str:
         codes = self._codes(author, "message:send", "draft:message")
         self._check(author, "add_message", to_principal, codes, "send message")

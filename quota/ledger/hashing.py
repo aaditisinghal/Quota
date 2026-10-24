@@ -17,7 +17,7 @@ ID_TABLES = {
 # Status-style tables have no natural unique key; their ref_id is "<label>#<rowid>".
 ROWID_TABLES = {
     "commission_line_status": "line_id", "approval_decisions": "approval_id", "je_status": "je_id",
-    "payroll_status": "file_id", "periods": "period",
+    "payroll_status": "file_id", "periods": "period", "event_status": "event_id",
 }
 INT_KEY_COLUMNS = {"version", "line_no"}
 

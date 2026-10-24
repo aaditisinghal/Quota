@@ -46,3 +46,10 @@ One line per choice made where IMPLEMENTATION.md was silent or ambiguous.
 - Step 4: printed disagreements are de-duplicated when two sources carry the same alternative (contract and e-sign countersignature); the stored resolutions keep both.
 - Step 4: `demo --db PATH` refuses an existing file instead of overwriting it, since the ledger is append-only.
 - Step 4: account names print from config, so 6110 shows as "Commission expense, amortization".
+- Phase 2: section 12 has no numbered steps, so Phase 2 is split into steps 5-8: (5) events + clock runner, (6) llm + extraction/reply guards, (7) seats + scripted people driving the Acme demo, (8) approver behavior + live personas.
+- Step 5: new append-only table `event_status(event_id, status, actor, known_at)` records which actor picked up which event (handled or ignored); it is hash-chained like the other status tables.
+- Step 5: new capability `claim:event` for both seats and `system:billing`, used by `WritePath.mark_event`; marking an event before its `release_at` is refused with the new code `EVENT_NOT_RELEASED` (no actor may act on the future).
+- Step 5: future world events wait in the clock runner's memory and are appended to `events` only when the clock reaches them, so `known_at` is the time the world learned of them (no future rows in the ledger). Future-dated rows already in `events` are also held until `release_at`.
+- Step 5: one event type beyond SPEC: `job.due {job, period|date|approval_id}` for the close calendar (commission run, revenue recognition, accrual, amortization, payroll file, churn review) and approver timers, so scheduled seat work is event-driven too.
+- Step 5: `message.posted` carries `message_id` and `to` in addition to SPEC's channel/author/text; `approval.decided` carries `result`/`next_approval_id` so seats can tell final from over-limit.
+- Step 5: timers are recomputed from current state every time; a timer releases one `job.due` event (deduped by type + payload) and silently disappears if its reason went away.

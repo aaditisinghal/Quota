@@ -45,6 +45,11 @@ CREATE TABLE events (
   id TEXT PRIMARY KEY, type TEXT NOT NULL, payload_json TEXT NOT NULL,
   release_at TEXT NOT NULL, created_by TEXT NOT NULL, known_at TEXT NOT NULL);
 
+-- Phase 2: which actor has picked up which event (latest row per (event_id, actor) wins).
+CREATE TABLE event_status (
+  event_id TEXT NOT NULL REFERENCES events(id), status TEXT NOT NULL,   -- handled|ignored
+  actor TEXT NOT NULL, known_at TEXT NOT NULL);
+
 -- ---------- Quota's work ----------
 CREATE TABLE decisions (
   id TEXT PRIMARY KEY, seat TEXT NOT NULL, kind TEXT NOT NULL, subject_id TEXT NOT NULL,
