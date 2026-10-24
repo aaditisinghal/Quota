@@ -253,6 +253,9 @@ class Graph:
         self.node(message_id, "message", f"{message_id} {message['author']} -> {message['to_principal']}",
                   author=message["author"], to=message["to_principal"], text=message["text"],
                   known_at=message["known_at"])
+        if depth > 0:
+            for decision_id in message_decisions(self.ro, message):
+                self.edge(message_id, self._decision(decision_id, depth - 1), "decided in")
         return message_id
 
     def _schedule(self, schedule_id, depth):
@@ -303,6 +306,16 @@ class Graph:
         self.node(event_id, "event", f"{event_id} {event['type']}", payload=_loads(event["payload_json"]),
                   release_at=event["release_at"], known_at=event["known_at"])
         return event_id
+
+
+def message_decisions(ro, message) -> list[str]:
+    """The decisions a message belongs to: for a person's message, the decisions that read it; for a seat's
+    message, the decisions that seat recorded at the same instant (the reply is written by the decision)."""
+    read = queries.fetch_all(ro, "SELECT id FROM decisions WHERE json_extract(output_json, '$.args.message_id') = ? "
+                                 "ORDER BY id", (message["id"],))
+    same = queries.fetch_all(ro, "SELECT id FROM decisions WHERE seat = ? AND known_at = ? ORDER BY id",
+                             (message["author"], message["known_at"])) if message["author"].startswith("seat:") else []
+    return [d["id"] for d in read + same]
 
 
 def trace(ro, kind: str, object_id: str, as_of: str | None = None, depth: int = 3) -> dict:

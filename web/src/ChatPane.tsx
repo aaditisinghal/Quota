@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type ChatTurn, type Message, type Pending, type Principal } from "./api";
-import { Money, Rich, TraceLink, personName, when } from "./format";
+import { ID, Money, Rich, TraceLink, personName, when } from "./format";
 import { TimelineRow } from "./Timeline";
 
 // Lines from the demo script, one click away; anything else can be typed.
@@ -124,7 +124,7 @@ export function ChatPane({ principal, setPrincipal, people, pending, version, on
               <TraceLink id={m.id} />
             </div>
             <div className="bubble-text">
-              <Rich text={m.text} />
+              <Rich text={m.text} trace={m.about ?? m.text.match(ID)?.[0] ?? m.id} />
             </div>
           </div>
         ))}

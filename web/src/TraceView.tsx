@@ -24,17 +24,15 @@ type Props = { id: string; stops: string[]; people: Principal[]; onOpen: (id: st
 
 export function TraceView({ id, stops, people, onOpen }: Props) {
   const [draft, setDraft] = useState(id);
-  const [index, setIndex] = useState<number>(stops.length); // stops.length means "now"
+  // The chosen instant itself, null meaning now: stops keep arriving as the timeline loads and grows.
+  const [asOf, setAsOf] = useState<string | null>(null);
   const [trace, setTrace] = useState<Trace | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const asOf = index < stops.length ? stops[index] : null;
+  const index = asOf === null ? stops.length : Math.max(0, stops.indexOf(asOf));
 
   useEffect(() => {
     setDraft(id);
   }, [id]);
-  useEffect(() => {
-    if (index > stops.length) setIndex(stops.length);
-  }, [stops.length, index]);
   useEffect(() => {
     let live = true;
     setError(null);
@@ -45,7 +43,7 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
     return () => {
       live = false;
     };
-  }, [id, asOf, stops.length]);
+  }, [id, asOf, asOf === null ? stops.length : 0]);
 
   const root = trace?.nodes.find((n) => n.id === trace.root) ?? null;
   const grouped = useMemo(() => {
@@ -76,7 +74,7 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
           <span>As of</span>
           <strong>{asOf ? when(asOf) : "now"}</strong>
           {asOf && (
-            <button className="link" onClick={() => setIndex(stops.length)}>
+            <button className="link" onClick={() => setAsOf(null)}>
               back to now
             </button>
           )}
@@ -85,8 +83,11 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
           type="range"
           min={0}
           max={stops.length}
-          value={Math.min(index, stops.length)}
-          onChange={(e) => setIndex(Number(e.target.value))}
+          value={index}
+          onChange={(e) => {
+            const i = Number(e.target.value);
+            setAsOf(i >= stops.length ? null : stops[i]);
+          }}
           aria-label="As-of time"
         />
         <div className="asof-scale">
@@ -134,11 +135,40 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
   );
 }
 
+// How an edge reads from the other end ("CL-0002 calculated in D-0005" -> on D-0005: "calculates CL-0002").
+const REVERSE: Record<string, string> = {
+  "calculated in": "calculates",
+  "decided by": "decides",
+  "decided in": "decides",
+  "approved by": "approves",
+  approval: "approves",
+  read: "read by",
+  resolved: "resolved in",
+  chosen: "chosen for",
+  alternative: "outranked in",
+  precedent: "applied in",
+  entry: "entry for",
+  about: "subject of",
+  "routed from": "routed to",
+  "routed to": "routed from",
+  made: "made by",
+  corrects: "corrected by",
+  "corrected by": "corrects",
+  "in payroll": "pays",
+  pays: "in payroll",
+  source: "source of",
+  "posted in": "posts to",
+  line: "on deal",
+  is: "is",
+  "refused on": "refused",
+  amortizes: "amortized by",
+};
+
 function links(node: TraceNode, edges: TraceEdge[]): ReactNode {
   const out = edges
     .filter((e) => e.from === node.id && !(node.kind === "decision" && e.label === "read"))
     .map((e) => ({ label: e.label, other: e.to }));
-  const into = edges.filter((e) => e.to === node.id).map((e) => ({ label: `${e.label} by`, other: e.from }));
+  const into = edges.filter((e) => e.to === node.id).map((e) => ({ label: REVERSE[e.label] ?? `${e.label} by`, other: e.from }));
   const all = [...out, ...into];
   if (all.length === 0) return null;
   return (

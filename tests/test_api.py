@@ -131,6 +131,9 @@ def test_scorecard_serves_the_eval_output(tmp_path):
 def test_messages_filter_by_principal(finished):
     jordan = finished.get("/messages?principal=jordan.kim").json()
     assert jordan and all("jordan.kim" in (m["author"], m["to"]) for m in jordan)
+    # Each message points at the decision it belongs to, so the dollars in a reply trace to that decision.
+    assert [(m["id"], m["about"]) for m in jordan[:2]] == [("M-0001", "D-0002"), ("M-0002", "D-0002")]
+    assert "D-0002" in {n["id"] for n in finished.get("/trace/message/M-0002").json()["nodes"]}
     assert len(finished.get("/messages").json()) > len(jordan)
 
 

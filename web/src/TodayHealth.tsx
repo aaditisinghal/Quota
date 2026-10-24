@@ -170,7 +170,9 @@ function HealthPanel({ health }: { health: Health }) {
                 <th>Account</th>
                 <th className="num">Debit</th>
                 <th className="num">Credit</th>
-                <th className="num">{before ? `Change since ${when(baseline!.clock)}` : "Change"}</th>
+                <th className="num" title={before ? `since ${when(baseline!.clock)}` : ""}>
+                  {before ? `Moved since ${baseline!.clock.slice(5, 10)}` : "Moved"}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -183,7 +185,7 @@ function HealthPanel({ health }: { health: Health }) {
                     </td>
                     <td className="num">{a.balance_cents > 0 && <Money cents={a.balance_cents} trace={`account/${a.account}`} />}</td>
                     <td className="num">{a.balance_cents < 0 && <Money cents={-a.balance_cents} trace={`account/${a.account}`} />}</td>
-                    <td className="num delta">{delta ? (delta > 0 ? "+" : "") + usd(delta) : ""}</td>
+                    <td className="num delta">{delta ? `${delta > 0 ? "Dr" : "Cr"} ${usd(Math.abs(delta))}` : ""}</td>
                   </tr>
                 );
               })}

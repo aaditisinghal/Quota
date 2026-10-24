@@ -98,7 +98,15 @@ export type Today = {
   held_total_cents: number;
 };
 
-export type Message = { id: string; author: string; to: string; text: string; at: string; author_name: string };
+export type Message = {
+  id: string;
+  author: string;
+  to: string;
+  text: string;
+  at: string;
+  author_name: string;
+  about: string | null; // the decision this message belongs to; its dollar figures trace there
+};
 
 export type ChatTurn = {
   action: { kind: string; approval_id?: string; message_id?: string; to?: string };

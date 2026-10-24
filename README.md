@@ -17,6 +17,7 @@ hash-chained ledger that refuses anything breaking an invariant.
 | People (VP, Controller, payroll, reps) | Scripted in the Acme demo, rule-played in the eval, model-played with `--live` | `quota/agent/personas.py`; people act only through the same approval and chat API, with the same write-path capabilities |
 | Models | Claude Opus 5.5 (`claude-opus-5-5`) for extraction, reply wording and `--live` people only | Every extracted number must appear verbatim in its source; replies are checked so every $ amount and date exists in the facts. The eval below uses no model |
 | Planted errors | Simulated, with an answer key | `python -m quota eval --seed N` compares decisions to `answer_key.json` |
+| Screens and API | Real, built here (FastAPI + React) | `python -m quota serve`; the SPEC demo flow was clicked through in a browser (below), and `tests/test_api_actions.py` drives the same flow through the API and gets the scripted books |
 
 ## Scorecard (measured)
 
@@ -62,7 +63,52 @@ column.
 - Seed 1729 was chosen by the builder, not hidden by a teammate.
 - Straight-through counts lines approved or paid with no hold, escalation or dispute; the Controller's routine
   approval of accrual and payroll batches is not counted as a human touch.
-- Not built yet: the SEC 10-K policy citations, the "attack your own controls" exercise, and the Phase 4 screens.
+- Not built yet: the SEC 10-K policy citations and the "attack your own controls" exercise.
+
+## Screens
+
+`python -m quota serve`, then open http://127.0.0.1:8000. The Acme world is paused at 2026-04-27 17:00, right
+after the April commission run drafted Jordan's $12,000 Q2 line, and you play the people. Four tabs, with the
+printed timeline on the right of each:
+
+- **Chat.** Speak as Jordan, Marcus, Priya, Dana or Morgan. Approvals waiting on that person show in orange
+  with Approve and Reject buttons (`approve A-0002` typed in chat does the same).
+- **Trace.** Any number, then its entry, decision (replayed from its recorded inputs), how each field was
+  resolved, the source rows with the column that was used marked, precedents and approvers. An as-of slider
+  replays it with only what was known then.
+- **Today + Ledger health.** What Quota did today, what is waiting on whom, and what is held, with totals.
+  Eight invariant checks, four subledger tie-outs, the trial balance with what moved since the last clock you
+  saw, and period locks.
+- **Inject + Scorecard.** Type what happens ("Acme churns in June with money back"), preview the events,
+  edit a field, run. Below it, the measured scorecard for seed 7, case by case.
+
+Every dollar figure that belongs to one object links to its trace; trial-balance figures link to the account's
+entries. Refusals show as timeline items with their reason codes. Orange marks only what needs a person.
+
+**Walkthrough (done in a headless Chromium, by clicking).**
+
+1. As Jordan: "Acme closed Mar 31…" gets held, with the countersignature evidence, rule R-BOOKING-01 and
+   "$12,000.00 vs $18,000.00 = $6,000.00". Pushing back gets held again (no new evidence). "escalate" sends it
+   to Marcus.
+2. As Marcus: "Honor Mar 31 for Acme" opens A-0001 for $6,000. Approve: his limit is $5,000, so it routes on as
+   A-0002 to Priya.
+3. As Jordan: "Just approve A-0002 yourself" is refused by the write path with NO_CAPABILITY,
+   INV5_SELF_APPROVAL and INV5_WRONG_APPROVER.
+4. As Priya: approve A-0002. That records precedent P-0001, and CL-0002 books $18,000 in Q1, superseding
+   CL-0001.
+5. Inject "Advance the clock to May 15": the accrual, approval and May payroll run. Then inject "Acme churns in
+   June with money back": a $90,000 refund (what was paid, less three months served), an $18,000 clawback to
+   1290, and $16,500 of deferred commission written off. All eight checks stay green, every tie-out holds,
+   and the trial balance balances.
+6. Trace CL-0002 now: clawed back, paid in PR-2026-05. Slide as-of to April 30: approved, with only the accrual
+   JE-0004 behind it.
+
+The API run gives the same twelve journal entries as the scripted demo. One timing differs: the Controller's
+routine approvals come 30 minutes after a request, so April's $500 amortization posts as a catch-up on May 31.
+
+| Dispute held | Over the limit, routed on | Churn: ledger health | Trace as of April 30 |
+| --- | --- | --- | --- |
+| ![](docs/screens/1-dispute.png) | ![](docs/screens/2-over-limit.png) | ![](docs/screens/3-churn-ledger-health.png) | ![](docs/screens/4-trace-as-of-april-30.png) |
 
 ## Planted errors and what Quota does
 
@@ -108,6 +154,11 @@ python -m quota eval --seed 7
 - `--stripe` (on `demo acme` and `eval`): billing runs in a Stripe sandbox. Put a sandbox key in `.env` as
   `STRIPE_API_KEY=sk_test_...` (git-ignored; see `.env.example`). Only test keys are accepted.
   `QUOTA_STRIPE_LIVE=1 pytest tests/test_stripe_live.py` runs the Acme demo against the sandbox.
+- `python -m quota serve [--world acme|fernhill] [--seed N] [--live] [--stripe] [--port 8000]`: the API and
+  screens over one running world. `--world fernhill --seed 7` serves the generated eval world, where scorecard
+  cases click through to their deals. `--live` reads chat and injected sentences with Claude. The built front
+  end ships in `quota/api/static`. To change it: `cd web && npm install && npm run dev` (proxies to port 8000),
+  then `npm run build`.
 - `python -m quota verify|replay|tb --db PATH`: chain and invariants, decision replay, trial balance as of a time
   (write a ledger with `demo acme --db PATH`).
 - `pytest -q`: the test suite.

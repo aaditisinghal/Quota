@@ -28,12 +28,18 @@ export function Timeline({ items, people, pending }: { items: TimelineItem[]; pe
       </div>
       <ol className="tl-list">
         {shown.map((item) => (
-          <TimelineRow key={item.seq} item={item} people={people} human={item.refs.some((r) => pending.has(r))} />
+          <TimelineRow key={item.seq} item={item} people={people} human={opens(item, pending)} />
         ))}
         {shown.length === 0 && <li className="empty">Nothing yet.</li>}
       </ol>
     </aside>
   );
+}
+
+/** The line that put a still-pending approval in someone's queue: the request itself, or the routing on. */
+function opens(item: TimelineItem, pending: Set<string>): boolean {
+  if (item.kind !== "APPROVAL") return false;
+  return [...pending].some((id) => item.text.startsWith(`${id} `) || item.text.includes(`; ${id} -> `));
 }
 
 export function TimelineRow({ item, people, human }: { item: TimelineItem; people: Principal[]; human?: boolean }) {

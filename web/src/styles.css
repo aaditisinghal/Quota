@@ -183,7 +183,7 @@ table { border-collapse: collapse; width: 100%; }
 
 /* today + health */
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 20px; }
 @media (max-width: 1200px) { .grid3, .grid2 { grid-template-columns: 1fr; } }
 .col { border: 1px solid var(--line); border-radius: 8px; padding: 4px 14px 12px; }
 .col ul { padding-left: 18px; margin: 4px 0; }

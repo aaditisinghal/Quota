@@ -17,6 +17,7 @@ import threading
 from quota import config
 from quota.agent.extract import ModelExtractor
 from quota.agent.personas import PolicyPeople
+from quota.api import views
 from quota.api.chat import RuleExtractor
 from quota.ledger import queries
 from quota.sim import demo_acme, seed_acme
@@ -62,7 +63,8 @@ class Session:
         if principal:
             rows = [m for m in rows if principal in (m["author"], m["to_principal"])]
         return [{"id": m["id"], "author": m["author"], "to": m["to_principal"], "text": m["text"],
-                 "at": m["known_at"], "author_name": config.display_name(m["author"])} for m in rows]
+                 "at": m["known_at"], "author_name": config.display_name(m["author"]),
+                 "about": (views.message_decisions(self.ro, m) or [None])[-1]} for m in rows]
 
     def close(self):
         self.world.close()
