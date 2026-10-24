@@ -231,6 +231,11 @@ def _recompute(fn, rows, decision, stored_args) -> dict:
         if claim.get("quote") and claim["quote"] not in message["text"]:
             return {"error": f"claim quote is not in {message['id']}"}
         return disputes.dispute_decision(rows, subject, now, claim=claim)["output"]
+    if fn == "void_entry":
+        return entries.void_decision(rows, subject, now)["output"]
+    from quota.engine.checks import CHECKS
+    if fn in CHECKS:
+        return CHECKS[fn](rows, **stored_args)
     if fn == "has_authority":
         from quota.agent.extract import has_authority, verify_claim
         from quota.engine import routing

@@ -102,10 +102,11 @@ def check_inv6(conn) -> list[Violation]:
 
 
 def check_inv7(conn) -> list[Violation]:
+    from quota.engine import ranking
     out = []
     for line in queries.fetch_all(conn, "SELECT * FROM commission_lines ORDER BY id"):
         deal = queries.as_of(conn, "deals", line["deal_id"], line["known_at"])
-        if deal is None or sum(s["bps"] for s in json.loads(deal["splits_json"])) != 10000:
+        if deal is None or ranking.splits_total(ranking.resolve_splits(deal, [])) != 10000:
             out.append(Violation("INV7", line["id"], f"splits on {line['deal_id']} do not sum to 10000"))
     return out
 

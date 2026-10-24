@@ -9,7 +9,8 @@ from typing import NoReturn
 
 from quota import clock as clk
 from quota import config
-from quota.engine import entries, routing
+from quota.engine import entries, ranking, routing
+from quota.money import fmt_usd
 from quota.ledger import hashing, queries
 from quota.ledger.invariants import entry_balanced
 
@@ -135,10 +136,9 @@ class WritePath:
         return decision_id is not None and queries.as_of(self.conn, "decisions", decision_id, None) is not None
 
     def _deal_splits_ok(self, deal_id) -> bool:
+        """INV7 on the effective splits (a duplicated full credit resolves to the owner of record)."""
         deal = queries.as_of(self.conn, "deals", deal_id, self.clock.now())
-        if deal is None:
-            return False
-        return sum(s["bps"] for s in json.loads(deal["splits_json"])) == 10000
+        return deal is not None and ranking.splits_total(ranking.resolve_splits(deal, [])) == 10000
 
     # ---------- facts ----------
 
@@ -431,8 +431,9 @@ class WritePath:
                                             "known_at": self.clock.now()})
         return file_id
 
-    def release_payroll(self, actor, file_id) -> str:
-        """Release an approved payroll file; returns the payment JE id."""
+    def release_payroll(self, actor, file_id, exported_lines: dict[str, int] | None = None) -> str:
+        """Release an approved payroll file; returns the payment JE id. `exported_lines` is what the payroll
+        system is about to pay ({line_id: cents}); it must match the approved file exactly."""
         payroll = queries.as_of(self.conn, "payroll_files", file_id, None)
         if payroll is None:
             raise KeyError(f"unknown payroll file {file_id}")
@@ -446,6 +447,12 @@ class WritePath:
             if (line is None or line["amount_cents"] != pl["amount_cents"]
                     or queries.line_status(self.conn, pl["line_id"]) != "approved"):
                 mismatched.append(pl["line_id"])
+            elif exported_lines is not None and exported_lines.get(pl["line_id"]) != pl["amount_cents"]:
+                exported = exported_lines.get(pl["line_id"])
+                mismatched.append(f"{pl['line_id']} (export {fmt_usd(exported) if exported is not None else 'missing'}"
+                                  f" vs approved {fmt_usd(pl['amount_cents'])})")
+        if exported_lines is not None:
+            mismatched += [f"{l} (export only)" for l in exported_lines if l not in {p['line_id'] for p in payroll_lines}]
         if mismatched or payroll["total_cents"] != sum(pl["amount_cents"] for pl in payroll_lines):
             codes.append("INV6_PAYROLL_MISMATCH")
         if queries.satisfied_approval(self.conn, "payroll_file", file_id, self.clock.now()) is None:

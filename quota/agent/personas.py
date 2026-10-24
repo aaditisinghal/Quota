@@ -100,12 +100,21 @@ class PeopleAPI:
             return
         self.world.emit(who, "PERIOD", f"{period} locked")
 
-    def release_payroll(self, who, file_id) -> str | None:
-        if self._get("payroll_files", file_id) is None:
+    def release_payroll(self, who, file_id, export_adjust: dict | None = None) -> str | None:
+        """Release from the payroll system's export. `export_adjust` ({deal_id, cents}) plants a hand edit in the
+        export (E16); the write path compares the export to the approved file line by line."""
+        payroll = self._get("payroll_files", file_id)
+        if payroll is None:
             self.world.emit(who, "PAYROLL", f"{file_id}: no such payroll file, nothing released")
             return None
+        exported = {pl["line_id"]: pl["amount_cents"] for pl in json.loads(payroll["lines_json"])}
+        if export_adjust:
+            edited = next((pl["line_id"] for pl in json.loads(payroll["lines_json"])
+                           if self._get("commission_lines", pl["line_id"])["deal_id"] == export_adjust["deal_id"]), None)
+            if edited:
+                exported[edited] += export_adjust["cents"]
         try:
-            je_id = self.wp.release_payroll(who, file_id)
+            je_id = self.wp.release_payroll(who, file_id, exported)
         except Refused as refused:
             self._refused(who, "release_payroll", file_id, refused)
             return None
@@ -155,7 +164,7 @@ class ScriptedPeople:
         elif do == "lock_period":
             self.api.lock_period(who, item["period"])
         elif do == "release_payroll":
-            self.api.release_payroll(who, item["file"])
+            self.api.release_payroll(who, item["file"], item.get("export_adjust"))
         else:
             raise ValueError(f"unknown scripted action {do!r}")
 

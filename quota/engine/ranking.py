@@ -10,7 +10,8 @@ RULES = {
     "R-BOOKING-01": "booking date = in-force precedent, then countersignature, then contract date, "
                     "then CRM close date; CRM close date is never trusted alone",
     "R-AMOUNT-01": "commissionable base = precedent, then signed contract year-1 ACV, then CRM amount",
-    "R-OWNER-01": "splits = VP-approved split record, then CRM splits",
+    "R-OWNER-01": "splits = VP-approved split record, then CRM splits; when the CRM gives two reps full credit, "
+                  "the owner of record keeps it (one owner per effective date)",
 }
 
 
@@ -96,8 +97,17 @@ def resolve_base(deal, contract, plan, precedents, now) -> Resolution:
 def resolve_splits(deal, approved_split_records) -> Resolution:
     candidates = [("vp_split_record", r["source"], r["splits"]) for r in approved_split_records or []
                   if r["deal_id"] == deal["id"]]
-    candidates.append(("crm", _fact_source("deals", deal), _loads(deal["splits_json"])))
+    crm = _loads(deal["splits_json"])
+    if (len(crm) > 1 and all(s["bps"] == 10000 for s in crm)
+            and any(s["rep"] == deal["owner_id"] for s in crm)):
+        # The same deal credited in full to two reps (a territory move left the old owner on it).
+        candidates.append(("owner_of_record", _fact_source("deals", deal), [{"rep": deal["owner_id"], "bps": 10000}]))
+    candidates.append(("crm", _fact_source("deals", deal), crm))
     return _resolve("splits", "R-OWNER-01", candidates)
+
+
+def splits_total(res: Resolution) -> int:
+    return sum(s["bps"] for s in res.value or [])
 
 
 def with_effects(res: Resolution, amount_at) -> Resolution:

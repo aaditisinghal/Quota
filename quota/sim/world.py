@@ -74,7 +74,10 @@ class BillingSystem:
             payload = queries.loads(event["payload_json"])
             churned[payload["deal_id"]] = payload["effective_date"]
         posted = {e["source_ref"] for e in queries.fetch_all(ro, "SELECT source_ref FROM journal_entries")}
+        voided = {d["id"] for d in queries.latest_rows(ro, "deals", now) if d["stage"] == "voided"}
         for deal_id in invoiced:
+            if deal_id in voided:
+                continue
             found = queries.fetch_one(ro, "SELECT id FROM contracts WHERE deal_id = ? AND known_at <= ? "
                                           "ORDER BY version DESC LIMIT 1", (deal_id, now))
             contract = queries.as_of(ro, "contracts", found["id"], now) if found else None

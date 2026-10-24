@@ -1,0 +1,86 @@
+"""Policy checks the seats run on facts (pure). Each takes the rows a decision records plus its arguments and
+returns the decision's output {"fn", "args", "result"}, so replay is `check(rows, **args) == stored`."""
+
+import json
+
+from quota.engine import ranking
+from quota.engine.calculator import latest_by_id, plan_for
+
+
+def _loads(value):
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def check_splits(rows, deal_id) -> dict:
+    """E02: credit must add up to 100% (after the owner-of-record rule for duplicated full credit)."""
+    deal = latest_by_id(rows["deals"])[deal_id]
+    res = ranking.resolve_splits(deal, rows.get("split_records", []))
+    total = ranking.splits_total(res)
+    return {"fn": "check_splits", "args": {"deal_id": deal_id},
+            "result": {"splits": res.value, "total_bps": total, "valid": total == 10000}}
+
+
+def check_backdating(rows, deal_id, period_locked_at) -> dict:
+    """E04: a CRM close date moved into a period that was already locked when the edit was made."""
+    versions = sorted((d for d in rows["deals"] if d["id"] == deal_id), key=lambda d: d["version"])
+    current, previous = versions[-1], (versions[-2] if len(versions) > 1 else None)
+    close = current["crm_close_date"]
+    moved = previous is not None and close is not None and close != previous["crm_close_date"]
+    backdated = bool(moved and period_locked_at and period_locked_at < current["known_at"])
+    return {"fn": "check_backdating", "args": {"deal_id": deal_id, "period_locked_at": period_locked_at},
+            "result": {"backdated": backdated, "close_date": close, "previous_close_date":
+                       previous["crm_close_date"] if previous else None, "edited_at": current["known_at"],
+                       "edited_by": current["source"]}}
+
+
+def check_collection(rows, deal_id, days) -> dict:
+    """E07: the plan pays on collection and holds commission once a customer is this many days late."""
+    deal = latest_by_id(rows["deals"])[deal_id]
+    plan = plan_for(rows, deal["owner_id"], deal["crm_close_date"] or "9999-12-31")
+    hold_days = int(plan.raw.get("collection_hold_days", 90))
+    return {"fn": "check_collection", "args": {"deal_id": deal_id, "days": days},
+            "result": {"held": days >= hold_days, "hold_days": hold_days, "pay_on": plan.raw.get("pay_on")}}
+
+
+def check_termination(rows, rep_id, end_date) -> dict:
+    """E09: the signed plan pays lines booked and collected before the end date; the rest are held."""
+    origin = {d["id"]: _loads(d["output_json"]) for d in rows.get("decisions", [])}
+    paid = {}
+    for b in rows.get("billing", []):
+        if b["kind"] == "payment":
+            paid[b["deal_id"]] = min(paid.get(b["deal_id"], b["at"]), b["at"])
+    eligible, held = [], []
+    for line in sorted(rows.get("commission_lines", []), key=lambda l: l["id"]):
+        booked = origin[line["decision_id"]]["args"]["booking"]["booking_ts"]
+        collected = paid.get(line["deal_id"])
+        ok = booked[:10] <= end_date and collected is not None and collected[:10] <= end_date
+        (eligible if ok else held).append(line["id"])
+    return {"fn": "check_termination", "args": {"rep_id": rep_id, "end_date": end_date},
+            "result": {"eligible": eligible, "held": held}}
+
+
+def check_territory(rows, target_rep, accounts) -> dict:
+    """E10: a territory move lists N accounts; any whose CRM owner did not change is a half-done move."""
+    deals = latest_by_id(rows["deals"])
+    moved = [a for a in accounts if a in deals and deals[a]["owner_id"] == target_rep]
+    unchanged = [a for a in accounts if a in deals and deals[a]["owner_id"] != target_rep]
+    return {"fn": "check_territory", "args": {"target_rep": target_rep, "accounts": list(accounts)},
+            "result": {"moved": moved, "unchanged": unchanged, "missing": [a for a in accounts if a not in deals]}}
+
+
+def check_plan_drift(rows, rep_id, version) -> dict:
+    """E14: a plan version that is not signed must not pay, and differs from what was signed."""
+    plans = sorted((r for r in rows["plans"] if r["rep_id"] == rep_id), key=lambda r: r["version"])
+    new = next(r for r in plans if r["version"] == version)
+    signed = [r for r in plans if r["signed_at"]]
+    signed_config = _loads(signed[-1]["config_json"]) if signed else {}
+    new_config = _loads(new["config_json"])
+    changed = sorted(k for k in set(new_config) | set(signed_config)
+                     if k not in ("version", "signed_at", "signed_doc") and new_config.get(k) != signed_config.get(k))
+    return {"fn": "check_plan_drift", "args": {"rep_id": rep_id, "version": version},
+            "result": {"drift": not new["signed_at"] and bool(signed) and bool(changed), "draft_version": version,
+                       "signed_version": signed[-1]["version"] if signed else None, "changed": changed}}
+
+
+CHECKS = {fn.__name__: fn for fn in (check_splits, check_backdating, check_collection, check_termination,
+                                     check_territory, check_plan_drift)}

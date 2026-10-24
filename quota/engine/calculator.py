@@ -1,6 +1,7 @@
 """Commission math (pure). The lower half assembles calculator inputs from fact rows, so the seat and
 replay run exactly the same code over the same rows."""
 
+import json
 from dataclasses import asdict, dataclass
 
 from quota.engine import ranking
@@ -80,16 +81,47 @@ def latest_by_id(table_rows) -> dict[str, dict]:
     return latest
 
 
+def contract_versions(rows, deal_id) -> list[dict]:
+    return sorted((c for c in rows.get("contracts") or [] if c["deal_id"] == deal_id), key=lambda c: c["version"])
+
+
+def amendment(contract) -> dict | None:
+    clauses = contract["clauses_json"]
+    return (json.loads(clauses) if isinstance(clauses, str) else clauses).get("amendment")
+
+
 def contract_for(rows, deal_id) -> dict | None:
-    contracts = [c for c in latest_by_id(rows.get("contracts")).values() if c["deal_id"] == deal_id]
-    return contracts[0] if contracts else None
+    """The latest contract version: its countersignature is the booking evidence."""
+    versions = contract_versions(rows, deal_id)
+    return versions[-1] if versions else None
+
+
+def base_contract(rows, deal_id) -> dict | None:
+    """The contract as signed (or corrected): amendments are separate bookings, not a new base."""
+    versions = contract_versions(rows, deal_id)
+    originals = [c for c in versions if not amendment(c)]
+    return (originals or versions or [None])[-1]
+
+
+def amendment_bookings(rows, deal_id) -> list[tuple[str, str, int, dict]]:
+    """(booking key, signed_at, ACV increase, version) for each amendment that raised ACV mid-term."""
+    out, previous = [], None
+    for contract in contract_versions(rows, deal_id):
+        terms = amendment(contract)
+        if terms and terms.get("kind") == "amendment" and previous is not None \
+                and contract["acv_cents"] > previous["acv_cents"]:
+            out.append((f"{deal_id}+v{contract['version']}", terms["signed_at"],
+                        contract["acv_cents"] - previous["acv_cents"], contract))
+        previous = contract
+    return out
 
 
 def plan_for(rows, rep_id, on_date) -> Plan:
-    plans = [plan_from_row(r) for r in latest_by_id(rows.get("plans")).values()]
-    mine = [p for p in plans if p.rep == rep_id]
-    in_effect = [p for p in mine if p.effective_from <= on_date[:10] <= p.effective_to]
-    return max(in_effect or mine, key=lambda p: p.version)
+    """The signed plan version in effect on that date (an unsigned draft never pays; it is flagged elsewhere)."""
+    mine = [p for p in (plan_from_row(r) for r in rows.get("plans") or []) if p.rep == rep_id]
+    in_effect = [p for p in mine if p.effective_from <= on_date[:10] <= p.effective_to] or mine
+    signed = [p for p in in_effect if p.signed_at] or in_effect
+    return max(signed, key=lambda p: p.version)
 
 
 def resolve_deal(rows, deal, rep_id, now) -> dict[str, ranking.Resolution]:
@@ -99,24 +131,27 @@ def resolve_deal(rows, deal, rep_id, now) -> dict[str, ranking.Resolution]:
     plan = plan_for(rows, rep_id, booking.value or now)
     return {
         "booking_date": booking,
-        "base": ranking.resolve_base(deal, contract, plan, precedents, now),
+        "base": ranking.resolve_base(deal, base_contract(rows, deal["id"]), plan, precedents, now),
         "splits": ranking.resolve_splits(deal, rows.get("split_records", [])),
     }
 
 
 def rep_bookings(rows, rep_id, now, overrides=None) -> dict[str, Booking]:
-    """deal_id -> Booking for every deal crediting this rep. overrides: {deal_id: {booking_ts, base_cents}}."""
+    """booking key -> Booking for every deal crediting this rep, plus "<deal>+v<n>" for each ACV-raising
+    amendment. overrides: {key: {booking_ts, base_cents}}."""
     out = {}
     for deal in latest_by_id(rows.get("deals")).values():
         resolved = resolve_deal(rows, deal, rep_id, now)
         bps = ranking.split_bps(resolved["splits"], rep_id)
         if bps <= 0 or resolved["booking_date"].value is None:
             continue
-        booking = Booking(deal["id"], rep_id, resolved["booking_date"].value, resolved["base"].value, bps)
-        for key, value in ((overrides or {}).get(deal["id"]) or {}).items():
-            if value is not None:
-                booking = Booking(**{**asdict(booking), key: value})
-        out[deal["id"]] = booking
+        out[deal["id"]] = Booking(deal["id"], rep_id, resolved["booking_date"].value, resolved["base"].value, bps)
+        for key, signed_at, increase, _ in amendment_bookings(rows, deal["id"]):
+            out[key] = Booking(key, rep_id, signed_at, increase, bps)
+    for key, changes in (overrides or {}).items():
+        for field_name, value in (changes or {}).items():
+            if value is not None and key in out:
+                out[key] = Booking(**{**asdict(out[key]), field_name: value})
     return out
 
 
@@ -128,14 +163,29 @@ def evaluate(rows, deal_id, rep_id, now, booking_ts=None, base_cents=None) -> Co
     return calc_commission(plan, this, prior_credit(list(bookings.values()), this))
 
 
-def commission_decision(rows, deal_id, rep_id, now) -> dict:
-    """Everything a commission_calc decision records; replay compares `output`."""
+def _increment_resolutions(rows, key, rep_id, now) -> dict[str, ranking.Resolution]:
+    deal_id = key.split("+")[0]
+    _, signed_at, increase, contract = next(a for a in amendment_bookings(rows, deal_id) if a[0] == key)
+    source = f"contracts:{deal_id}:v{contract['version']}"
     deal = latest_by_id(rows.get("deals"))[deal_id]
-    resolved = resolve_deal(rows, deal, rep_id, now)
-    booking_res = ranking.with_effects(
-        resolved["booking_date"], lambda v: evaluate(rows, deal_id, rep_id, now, booking_ts=v).amount_cents)
-    base_res = ranking.with_effects(
-        resolved["base"], lambda v: evaluate(rows, deal_id, rep_id, now, base_cents=v).amount_cents)
+    return {"booking_date": ranking.Resolution("booking_date", signed_at, source, "R-BOOKING-01", [], "amendment"),
+            "base": ranking.Resolution("base", increase, source, "R-AMOUNT-01", [], "amendment_increase"),
+            "splits": ranking.resolve_splits(deal, rows.get("split_records", []))}
+
+
+def commission_decision(rows, deal_id, rep_id, now) -> dict:
+    """Everything a commission_calc decision records; replay compares `output`. `deal_id` may be an amendment
+    booking key ("<deal>+v<n>"): commission on the ACV increase, booked when the amendment was signed."""
+    if "+" in deal_id:
+        resolved = _increment_resolutions(rows, deal_id, rep_id, now)
+        booking_res, base_res = resolved["booking_date"], resolved["base"]
+    else:
+        deal = latest_by_id(rows.get("deals"))[deal_id]
+        resolved = resolve_deal(rows, deal, rep_id, now)
+        booking_res = ranking.with_effects(
+            resolved["booking_date"], lambda v: evaluate(rows, deal_id, rep_id, now, booking_ts=v).amount_cents)
+        base_res = ranking.with_effects(
+            resolved["base"], lambda v: evaluate(rows, deal_id, rep_id, now, base_cents=v).amount_cents)
     bookings = rep_bookings(rows, rep_id, now)
     this = bookings[deal_id]
     prior = prior_credit(list(bookings.values()), this)

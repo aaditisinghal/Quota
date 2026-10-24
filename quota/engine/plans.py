@@ -68,5 +68,6 @@ def load_plan(path) -> Plan:
 
 
 def plan_from_row(row: dict) -> Plan:
-    """A `plans` table row -> Plan (config_json holds the normalized YAML)."""
-    return plan_from_config(json.loads(row["config_json"]))
+    """A `plans` table row -> Plan (config_json holds the normalized YAML; the row says whether it is signed)."""
+    return plan_from_config({**json.loads(row["config_json"]), "version": row["version"],
+                             "signed_at": row["signed_at"] or None})

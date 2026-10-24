@@ -1,8 +1,10 @@
-"""seat:commissions_analyst: commission runs, disputes, plan exceptions, payroll files, clawback lines.
+"""seat:commissions_analyst: commission runs, disputes, plan exceptions, payroll files, clawback lines, and
+the checks that hold or flag commission when the facts are wrong.
 
-Routes: job.due commission_run / payroll_file / churn_review, message.posted to this seat (a dispute, an
-escalation, an exception grant, a chat approval, or something to clarify) and approval.decided on plan
-exceptions.
+Routes: job.due commission_run / payroll_file / churn_review / approver timers, message.posted to this seat (a
+dispute, an escalation, an exception grant, a chat approval, or something to clarify), approval.decided on plan
+exceptions, and the world's facts: deal.updated (backdating, voids), payment.overdue, rep.terminated,
+rep.territory_changed, plan.amended.
 """
 
 import json
@@ -11,7 +13,7 @@ from quota import clock as clk
 from quota import config
 from quota.agent.extract import extract_claim, has_authority
 from quota.agent.seat import Seat
-from quota.engine import calculator, disputes, ranking, routing
+from quota.engine import calculator, checks, disputes, ranking, routing
 from quota.ledger import queries
 from quota.ledger.write_path import Refused
 from quota.money import fmt_usd
@@ -47,9 +49,13 @@ def calc_text(calc) -> str:
             f"{booking.rule_id}; {base_text} {base.rule_id}{prior})")
 
 
+FACT_ROUTES = {"deal.updated": "deal_updated", "payment.overdue": "overdue", "rep.terminated": "terminated",
+               "rep.territory_changed": "territory", "plan.amended": "plan_amended"}
+
+
 class CommissionsAnalyst(Seat):
     principal = ANALYST
-    handles = frozenset({"message.posted", "approval.decided", "job.due"})
+    handles = frozenset({"message.posted", "approval.decided", "job.due", *FACT_ROUTES})
 
     def __init__(self, world, extractor, llm=None):
         super().__init__(world)
@@ -64,7 +70,7 @@ class CommissionsAnalyst(Seat):
             return "exception_decided" if self.get("approvals", p["approval_id"])["kind"] == "plan_exception" else None
         if ev.type == "job.due":
             return JOB_ROUTES.get(p["job"])
-        return None
+        return FACT_ROUTES.get(ev.type)
 
     # ---------- shared writes ----------
 
@@ -73,16 +79,27 @@ class CommissionsAnalyst(Seat):
         self.emit(kind, f"{message_id} to {to}:\n{text}" if kind == "REPLY" else f"{message_id} to {to}: {text}")
         return message_id
 
-    def record_calc(self, rows, deal_id, rep_id, calc, corrects_id=None) -> tuple[str, str]:
-        """A commission_calc decision and its draft line (correcting an earlier line if given)."""
+    def flag(self, kind, subject_id, rows, output, outcome, text, notify=()) -> str:
+        """Record a check's decision (held or escalated) and tell the people who must act on it."""
+        decision_id = self.wp.record_decision(self.principal, kind, subject_id, queries.input_refs(rows), {}, [],
+                                              output, outcome, text)
+        self.emit("DECISION", f"{decision_id} {kind} {subject_id}: {text}")
+        for to, message in notify:
+            self.send(to, message)
+        return decision_id
+
+    def record_calc(self, rows, deal_id, rep_id, calc, corrects_id=None, key=None) -> tuple[str, str]:
+        """A commission_calc decision and its draft line (correcting an earlier line if given). `key` is the
+        booking key when it is not the deal itself (an amendment, "<deal>+v<n>")."""
         text = calc_text(calc)
         # Two sources can carry the same alternative (contract + e-sign countersignature); print it once.
         alternatives = list(dict.fromkeys(alt_text(d) for res in calc["resolved"].values() for d in res.disagreements))
         explanation = text + ("; disagreements: " + "; ".join(alternatives) if alternatives else "")
+        subject = f"{key or deal_id}/{rep_id}"
         decision_id = self.wp.record_decision(
-            self.principal, "commission_calc", f"{deal_id}/{rep_id}", queries.input_refs(rows), calc["resolutions"],
+            self.principal, "commission_calc", subject, queries.input_refs(rows), calc["resolutions"],
             calc["precedent_ids"], calc["output"], "drafted", explanation)
-        self.emit("DECISION", f"{decision_id} commission_calc {deal_id}/{rep_id}: {text}"
+        self.emit("DECISION", f"{decision_id} commission_calc {subject}: {text}"
                   + (f"\ndisagreements: {'; '.join(alternatives)}" if alternatives else ""))
         r = calc["result"]
         line_id = self.wp.add_commission_line(self.principal, {
@@ -133,28 +150,55 @@ class CommissionsAnalyst(Seat):
         reps = sorted({r["rep_id"] for r in queries.fetch_all(self.ro, "SELECT rep_id FROM plans WHERE known_at <= ?",
                                                               (self.now,))})
         ctx.data["rows"] = {rep: queries.commission_rows(self.ro, rep, self.now) for rep in reps}
-        ctx.data["lined"] = {(l["deal_id"], l["rep_id"]) for l in self.lines()}
+        ctx.data["lined"] = {d["subject_id"] for d in self.decisions(kind="commission_calc")}
+        ctx.data["split_holds"] = {d["subject_id"] for d in self.decisions(kind="splits_check")}
+        ctx.data["territory_holds"] = {d["subject_id"]: json.loads(d["output_json"])["args"]["target_rep"]
+                                       for d in self.decisions(kind="territory_check")}
 
     def reconcile_commission_run(self, ctx):
-        """Deals whose resolved booking falls in the run's period and that have no line yet."""
+        """Bookings (deals, and amendments that raised ACV) in the run's window with no commission yet. A deal
+        whose credit does not add up to 100% is held for a split decision; a deal left behind by a half-done
+        territory move waits until its CRM owner is the move's target."""
         period = ctx.event.payload["period"]
-        todo = []
+        since = ctx.event.payload.get("since") or period
+        todo, bad_splits = [], {}
         for rep, rows in ctx.data["rows"].items():
-            for deal in calculator.latest_by_id(rows["deals"]).values():
-                if (deal["id"], rep) in ctx.data["lined"]:
+            deals = calculator.latest_by_id(rows["deals"])
+            for key, booking in calculator.rep_bookings(rows, rep, self.now).items():
+                if f"{key}/{rep}" in ctx.data["lined"] or not since <= clk.period_of(booking.booking_ts) <= period:
                     continue
-                resolved = calculator.resolve_deal(rows, deal, rep, self.now)
-                booking = resolved["booking_date"].value
-                if booking and clk.period_of(booking) == period and ranking.split_bps(resolved["splits"], rep) > 0:
-                    todo.append((rep, deal["id"]))
+                deal = deals[key.split("+")[0]]
+                if ranking.splits_total(ranking.resolve_splits(deal, [])) != 10000:
+                    if deal["id"] not in ctx.data["split_holds"]:
+                        bad_splits[deal["id"]] = deal
+                    continue
+                target = ctx.data["territory_holds"].get(deal["id"])
+                if target is not None and deal["owner_id"] != target:
+                    continue
+                todo.append((rep, key))
+        ctx.data["bad_splits"] = bad_splits
         return todo
 
     def calculate_commission_run(self, ctx):
-        return [(rep, deal_id, calculator.commission_decision(ctx.data["rows"][rep], deal_id, rep, self.now))
-                for rep, deal_id in ctx.res]
+        return [(rep, key, calculator.commission_decision(ctx.data["rows"][rep], key, rep, self.now))
+                for rep, key in ctx.res]
 
     def write_commission_run(self, ctx):
-        return [self.record_calc(ctx.data["rows"][rep], deal_id, rep, calc)[0] for rep, deal_id, calc in ctx.calc]
+        decision_ids = []
+        owner = routing.owner("splits")
+        for deal_id, deal in sorted(ctx.data["bad_splits"].items()):
+            rows = {"deals": [deal]}
+            output = checks.check_splits(rows, deal_id)
+            shares = " + ".join(f"{s['rep']} {s['bps'] / 100:g}%" for s in output["result"]["splits"])
+            decision_ids.append(self.flag(
+                "splits_check", deal_id, rows, output, "held",
+                f"credit on {deal_id} adds to {output['result']['total_bps'] / 100:g}% ({shares}); no lines until "
+                f"{owner} confirms the split",
+                [(owner, f"{deal['account']} ({deal_id}) credits {shares}, which is "
+                         f"{output['result']['total_bps'] / 100:g}%. Both lines are held. What is the approved split?")]))
+        for rep, key, calc in ctx.calc:
+            decision_ids.append(self.record_calc(ctx.data["rows"][rep], key.split("+")[0], rep, calc, key=key)[0])
+        return decision_ids
 
     # ---------- message.posted ----------
 
@@ -455,8 +499,15 @@ class CommissionsAnalyst(Seat):
     # ---------- job.due payroll_file ----------
 
     def payroll_held(self) -> set[str]:
-        """Lines a decision has taken out of payroll (subclasses of hold add to this)."""
-        return set()
+        """Lines a hold decision has taken out of payroll: deals on collection hold (until the customer pays) and
+        lines the signed plan does not pay after a termination."""
+        held = set()
+        for decision in self.decisions(kind="collection_hold"):
+            if not queries.collected(self.ro, decision["subject_id"], self.now):
+                held |= {l["id"] for l in self.lines(deal_id=decision["subject_id"])}
+        for decision in self.decisions(kind="termination_review"):
+            held |= set(json.loads(decision["output_json"])["result"]["held"])
+        return held
 
     def reconcile_payroll_file(self, ctx):
         """Approved positive lines on collected deals (the plan pays on collection). Recoveries (negative lines)
@@ -514,22 +565,154 @@ class CommissionsAnalyst(Seat):
                                         f"Silence is not approval.")
         return []
 
-    # ---------- job.due churn_review: the rep's side of a recoverable clawback ----------
+    # ---------- the rep's side of a recovery (churn clawback, voided deal) ----------
 
-    def reconcile_clawback_lines(self, ctx):
+    def pending_recoveries(self) -> list[tuple[dict, dict]]:
+        """Recoverable clawback / void decisions whose line has no negative correcting line yet."""
         corrected = {l["corrects_id"] for l in self.lines() if l["amount_cents"] < 0}
-        return [(d, self.get("commission_lines", d["subject_id"])) for d in self.decisions(kind="clawback")
+        return [(d, self.get("commission_lines", d["subject_id"]))
+                for kind in ("clawback", "void_reversal") for d in self.decisions(kind=kind)
                 if json.loads(d["output_json"])["args"]["recoverable"] and d["subject_id"] not in corrected]
 
-    def write_clawback_lines(self, ctx):
-        for decision, line in ctx.res:
-            clawback = self.wp.add_commission_line(self.principal, {
+    def write_recoveries(self, recoveries) -> list[str]:
+        for decision, line in recoveries:
+            recovery = self.wp.add_commission_line(self.principal, {
                 "rep_id": line["rep_id"], "deal_id": line["deal_id"], "booking_quarter": line["booking_quarter"],
                 "credit_cents": -line["credit_cents"], "base_portion_cents": -line["base_portion_cents"],
                 "accel_portion_cents": -line["accel_portion_cents"], "amount_cents": -line["amount_cents"]},
                 decision["id"], corrects_id=line["id"])
-            self.emit("ENTRY", f"{clawback} clawback line {fmt_usd(-line['amount_cents'])}, corrects {line['id']} "
-                               f"({decision['id']})")
+            self.emit("ENTRY", f"{recovery} {decision['kind'].replace('_', ' ')} line {fmt_usd(-line['amount_cents'])}"
+                               f", corrects {line['id']} ({decision['id']})")
             self.wp.set_line_status(self.principal, line["id"], "clawed_back")
             self.emit("ENTRY", f"{line['id']} -> clawed_back")
         return []
+
+    def reconcile_clawback_lines(self, ctx):
+        return self.pending_recoveries()
+
+    def write_clawback_lines(self, ctx):
+        return self.write_recoveries(ctx.res)
+
+    # ---------- deal.updated: backdated close dates (E04), and the rep's side of a void (E15) ----------
+
+    def gather_deal_updated(self, ctx):
+        deal_id = ctx.event.payload["deal_id"]
+        versions = queries.fetch_all(self.ro, "SELECT * FROM deals WHERE id = ? AND known_at <= ? ORDER BY version",
+                                     (deal_id, self.now))
+        current = versions[-1]
+        ctx.rows = {"deals": versions[-2:]}
+        ctx.data["locked_at"] = None
+        close = current["crm_close_date"]
+        if close and queries.period_locked(self.ro, clk.period_of(close), current["known_at"]):
+            ctx.data["locked_at"] = queries.fetch_one(
+                self.ro, "SELECT known_at FROM periods WHERE period = ? AND status = 'locked' AND known_at <= ? "
+                         "ORDER BY known_at DESC, rowid DESC LIMIT 1", (clk.period_of(close), current["known_at"]))["known_at"]
+
+    def calculate_deal_updated(self, ctx):
+        return checks.check_backdating(ctx.rows, ctx.event.payload["deal_id"], ctx.data["locked_at"])
+
+    def write_deal_updated(self, ctx):
+        decision_ids = []
+        result = ctx.calc["result"]
+        if result["backdated"]:
+            deal_id = ctx.event.payload["deal_id"]
+            period = clk.period_of(result["close_date"])
+            text = (f"BACKDATED: CRM close date moved {result['previous_close_date']} -> {result['close_date']} by "
+                    f"{result['edited_by']} at {result['edited_at']}, after {period} was locked "
+                    f"({ctx.data['locked_at']}); the booking on record stands")
+            note = (f"{deal_id}: the CRM close date was changed to {result['close_date']} at {result['edited_at']}, "
+                    f"after {period} was locked. I kept the booking on record and changed nothing. Please confirm.")
+            decision_ids.append(self.flag("backdating_check", deal_id, ctx.rows, ctx.calc, "escalated", text,
+                                          [(routing.owner("plan_exception"), note), (routing.owner("material_flag"), note)]))
+        return decision_ids + self.write_recoveries(self.pending_recoveries())
+
+    # ---------- payment.overdue: collection hold (E07) ----------
+
+    def gather_overdue(self, ctx):
+        deal = self.get("deals", ctx.event.payload["deal_id"])
+        ctx.rows = {"deals": [deal], "plans": queries.fetch_all(
+            self.ro, "SELECT * FROM plans WHERE rep_id = ? AND known_at <= ? ORDER BY version", (deal["owner_id"], self.now))}
+
+    def calculate_overdue(self, ctx):
+        return checks.check_collection(ctx.rows, ctx.event.payload["deal_id"], ctx.event.payload["days"])
+
+    def write_overdue(self, ctx):
+        result, deal = ctx.calc["result"], ctx.rows["deals"][0]
+        if not result["held"]:
+            return []
+        days = ctx.event.payload["days"]
+        text = (f"collection hold: {deal['account']} is {days} days late (plan holds at {result['hold_days']}); "
+                f"commission waits for payment")
+        reps = sorted({s["rep"] for s in json.loads(deal["splits_json"])})
+        return [self.flag("collection_hold", deal["id"], ctx.rows, ctx.calc, "held", text,
+                          [(rep, f"{deal['account']} is {days} days past due, so your commission on {deal['id']} is on "
+                                 f"collection hold. It is released when the customer pays.") for rep in reps])]
+
+    # ---------- rep.terminated (E09) ----------
+
+    def gather_terminated(self, ctx):
+        rep_id = ctx.event.payload["rep_id"]
+        lines = [l for l in self.lines(rep_id=rep_id) if l["amount_cents"] > 0
+                 and self.line_status(l["id"]) not in ("superseded", "clawed_back")]
+        origins = [self.get("decisions", l["decision_id"]) for l in lines]
+        deal_ids = sorted({l["deal_id"] for l in lines})
+        payments = [b for d in deal_ids for b in queries.fetch_all(
+            self.ro, "SELECT * FROM billing WHERE deal_id = ? AND kind = 'payment' AND known_at <= ?", (d, self.now))]
+        ctx.rows = {"people": [self.get("people", rep_id)], "commission_lines": lines, "decisions": origins,
+                    "billing": payments}
+
+    def calculate_terminated(self, ctx):
+        return checks.check_termination(ctx.rows, ctx.event.payload["rep_id"], ctx.event.payload["end_date"])
+
+    def write_terminated(self, ctx):
+        p, result = ctx.event.payload, ctx.calc["result"]
+        name = config.display_name(p["rep_id"])
+        text = (f"{name} left {p['end_date']} ({p['state']}): the signed plan pays lines booked and collected before "
+                f"then ({', '.join(result['eligible']) or 'none'}); held: {', '.join(result['held']) or 'none'}; no "
+                f"clawback without a signed clause")
+        return [self.flag("termination_review", p["rep_id"], ctx.rows, ctx.calc,
+                          "held" if result["held"] else "posted", text,
+                          [(routing.owner("material_flag"), f"Policy flag: {text}.")])]
+
+    # ---------- rep.territory_changed: a half-done move (E10) ----------
+
+    def gather_territory(self, ctx):
+        accounts = ctx.event.payload["accounts"]
+        ctx.rows = {"deals": [d for d in (self.get("deals", a) for a in accounts) if d]}
+
+    def calculate_territory(self, ctx):
+        return checks.check_territory(ctx.rows, ctx.event.payload["rep_id"], ctx.event.payload["accounts"])
+
+    def write_territory(self, ctx):
+        p, result = ctx.event.payload, ctx.calc["result"]
+        if not result["unchanged"]:
+            return []
+        owner = routing.owner("territory")
+        decision_ids = [self.flag(
+            "territory_check", deal_id, ctx.rows, ctx.calc, "held",
+            f"territory move to {p['rep_id']} effective {p['effective_date']} lists {len(p['accounts'])} accounts but "
+            f"only {len(result['moved'])} changed owner in the CRM; {deal_id} is held until its owner is updated")
+            for deal_id in result["unchanged"]]
+        self.send(owner, f"The territory move to {config.display_name(p['rep_id'])} effective {p['effective_date']} "
+                         f"({p['actor']}) lists {len(p['accounts'])} accounts, but only {len(result['moved'])} changed "
+                         f"owner in the CRM. Held: {', '.join(result['unchanged'])}. Please finish the move.")
+        return decision_ids
+
+    # ---------- plan.amended: an unsigned draft that differs from the signed plan (E14) ----------
+
+    def gather_plan_amended(self, ctx):
+        ctx.rows = {"plans": queries.fetch_all(self.ro, "SELECT * FROM plans WHERE rep_id = ? AND known_at <= ? "
+                                                        "ORDER BY version", (ctx.event.payload["rep_id"], self.now))}
+
+    def calculate_plan_amended(self, ctx):
+        return checks.check_plan_drift(ctx.rows, ctx.event.payload["rep_id"], ctx.event.payload["version"])
+
+    def write_plan_amended(self, ctx):
+        p, result = ctx.event.payload, ctx.calc["result"]
+        if not result["drift"]:
+            return []
+        owner = routing.owner("plan_config")
+        text = (f"plan v{result['draft_version']} for {p['rep_id']} is an unsigned draft that differs from signed "
+                f"v{result['signed_version']} ({', '.join(result['changed'])}); paying on the signed plan")
+        return [self.flag("plan_drift", p["rep_id"], ctx.rows, ctx.calc, "escalated", text,
+                          [(owner, f"Config drift: {text}. A change needs a signed amendment.")])]

@@ -18,13 +18,15 @@ JOB_ROUTES = {"commission_accrual": "accrual", "amortization": "amortization", "
 
 class DeferredAccountant(Seat):
     principal = ACCOUNTANT
-    handles = frozenset({"job.due", "approval.decided"})
+    handles = frozenset({"job.due", "approval.decided", "deal.updated"})
 
     def route(self, ev):
         if ev.type == "job.due":
             return JOB_ROUTES.get(ev.payload["job"])
         if ev.type == "approval.decided":
             return "entry_decided" if self.get("approvals", ev.payload["approval_id"])["kind"] == "journal_entry" else None
+        if ev.type == "deal.updated":
+            return "void" if ev.payload["fields"].get("stage") == "voided" else None
         return None
 
     # ---------- shared ----------
@@ -56,7 +58,8 @@ class DeferredAccountant(Seat):
         """Positive lines not yet accrued (superseded and clawed-back lines are done with)."""
         accrued = {d["subject_id"] for d in self.decisions(kind="commission_accrual")}
         return [l for l in self.lines() if l["amount_cents"] > 0 and l["id"] not in accrued
-                and self.line_status(l["id"]) in ("draft", "approved")]
+                and self.line_status(l["id"]) in ("draft", "approved")
+                and self.get("deals", l["deal_id"])["stage"] != "voided"]
 
     def calculate_accrual(self, ctx):
         out = []
@@ -121,12 +124,48 @@ class DeferredAccountant(Seat):
                                                    args["start_period"], schedule)
                 self.emit("ENTRY", f"{schedule_id} amortization schedule {line_id}: {args['term_months']} x "
                                    f"{fmt_usd(schedule[0][1])} from {args['start_period']} ({decision['id']})")
-        elif decision["kind"] == "clawback":
+        elif decision["kind"] in ("clawback", "void_reversal"):
             for line in self.lines():
                 if line["decision_id"] == decision["id"] and line["amount_cents"] < 0:
                     self.wp.set_line_status(self.principal, line["id"], "approved")
-                    self.emit("ENTRY", f"{line['id']} -> approved (clawback {entry['id']}, {root['id']})")
+                    self.emit("ENTRY", f"{line['id']} -> approved ({decision['kind']} {entry['id']}, {root['id']})")
         return []
+
+    # ---------- deal.updated to voided (E15) ----------
+
+    def gather_void(self, ctx):
+        deal_id = ctx.event.payload["deal_id"]
+        reversed_ = {d["subject_id"] for kind in ("clawback", "void_reversal") for d in self.decisions(kind=kind)}
+        schedules = {s["line_id"]: s for s in self.active_schedules()}
+        ctx.data["deal"] = self.get("deals", deal_id)
+        ctx.data["todo"] = [(line, schedules.get(line["id"])) for line in self.lines(deal_id=deal_id)
+                            if line["amount_cents"] > 0 and line["id"] not in reversed_
+                            and self.line_status(line["id"]) in ("approved", "paid")]
+
+    def calculate_void(self, ctx):
+        out = []
+        for line, schedule in ctx.data["todo"]:
+            rows = {"deals": [ctx.data["deal"]], "commission_lines": [line],
+                    "amortization_schedules": [schedule] if schedule else []}
+            out.append((line, schedule, rows, entries.void_decision(rows, line["id"], self.now)))
+        return out
+
+    def write_void(self, ctx):
+        decision_ids = []
+        for line, schedule, rows, void in ctx.calc:
+            text = (f"{line['deal_id']} voided {void['output']['args']['date']}: the commission on {line['id']} was "
+                    f"never earned; recover {fmt_usd(line['amount_cents'])} from {line['rep_id']} in the open period "
+                    f"({entry_text(void['entry']['lines'])})")
+            decision_id = self.wp.record_decision(self.principal, "void_reversal", line["id"], queries.input_refs(rows),
+                                                  {}, [], void["output"], "drafted", text)
+            self.emit("DECISION", f"{decision_id} void_reversal {line['id']}: {text}")
+            je_id = self.draft(void["entry"], decision_id)
+            self.emit("ENTRY", f"{je_id} drafted void_reversal {line['id']}: {entry_text(void['entry']['lines'])}")
+            self.request_entry_approval(je_id, line["amount_cents"])
+            if schedule:
+                self.emit("ENTRY", f"{schedule['id']} cancelled ({self.wp.cancel_schedule(self.principal, schedule['id'])})")
+            decision_ids.append(decision_id)
+        return decision_ids
 
     # ---------- job.due amortization ----------
 
@@ -189,8 +228,9 @@ class DeferredAccountant(Seat):
             text = (f"booking {a['booking_date']}{precedent}, churn {a['churn_date']} {within} {a['window_months']} "
                     f"months (window ends {a['window_end']}), {signed_plan} -> "
                     f"{'recoverable' if a['recoverable'] else 'not recoverable'}")
+            # A clawback always needs the Controller's sign-off on its entry: an escalation, not a routine draft.
             decision_id = self.wp.record_decision(self.principal, "clawback", line["id"], queries.input_refs(rows),
-                                                  cb["resolutions"], cb["precedent_ids"], cb["output"], "drafted", text)
+                                                  cb["resolutions"], cb["precedent_ids"], cb["output"], "escalated", text)
             self.emit("DECISION", f"{decision_id} clawback {line['id']}: {text}")
             je_id = self.draft(cb["entry"], decision_id)
             self.emit("ENTRY", f"{je_id} drafted clawback {line['id']}: {entry_text(cb['entry']['lines'])}")

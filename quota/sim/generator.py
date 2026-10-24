@@ -67,7 +67,8 @@ class Deal:
     crm_amount_cents: int
     invoice_at: str
     paid_at: str | None
-    tags: set = field(default_factory=set)      # planted-error notes (step 11)
+    tags: set = field(default_factory=set)      # planted case ids
+    created_as: dict | None = None              # CRM fields at creation when a later edit changed them (E10)
 
 
 def _ts(day: date, minutes_after_nine: int = 0) -> str:
@@ -103,6 +104,9 @@ class Fernhill:
         self.actions: list[dict] = []
         self.extractions: dict[str, dict] = {}
         self.answer_key: list[dict] = []
+        self.payroll_edits: dict[str, dict] = {}      # period -> a hand edit in Dana's export (E16)
+        self.used_deals: set[str] = set()
+        self.exclusive_reps: set[str] = set()         # reps whose whole book is one case
 
     # ---------- people and deals ----------
 
@@ -161,11 +165,234 @@ class Fernhill:
                     _ts(created) if created < day else clk.add_minutes(booked_at, -240), day.isoformat(), acv,
                     invoice_at, paid_at)
 
+    # ---------- planting (one instance per call; each returns its answer-key case) ----------
+
+    @staticmethod
+    def deal_reps(deal: Deal) -> set[str]:
+        return {deal.owner} | {s["rep"] for s in deal.splits}
+
+    def pick(self, predicate=lambda d: True, single=True) -> Deal:
+        """A deal no other case uses, on a rep whose book is not reserved for a rep-level case."""
+        candidates = [d for d in self.deals if d.id not in self.used_deals and predicate(d)
+                      and not self.deal_reps(d) & self.exclusive_reps and (len(d.splits) == 1 or not single)]
+        if not candidates:
+            raise ValueError("no deal fits this plant")
+        deal = self.rng.choice(candidates)
+        self.used_deals.add(deal.id)
+        return deal
+
+    def take_rep(self, predicate=lambda r: True) -> Rep:
+        """A rep reserved for a rep-level case: none of their deals is used by any other case."""
+        busy = {r for d in self.deals if d.id in self.used_deals for r in self.deal_reps(d)} | self.exclusive_reps
+        candidates = [r for r in self.reps if r.id not in busy and predicate(r)]
+        if not candidates:
+            raise ValueError("no rep fits this plant")
+        rep = self.rng.choice(candidates)
+        self.exclusive_reps.add(rep.id)
+        return rep
+
+    def rebook(self, deal: Deal, booked_at: str) -> None:
+        lag = (date.fromisoformat(deal.paid_at[:10]) - date.fromisoformat(deal.invoice_at[:10])).days \
+            if deal.paid_at else None
+        deal.booked_at, deal.crm_close_date = booked_at, booked_at[:10]
+        deal.invoice_at = clk.add_minutes(booked_at, 120)
+        if lag is not None:
+            paid = date.fromisoformat(deal.invoice_at[:10]) + timedelta(days=lag)
+            deal.paid_at = _ts(paid, 60) if paid.isoformat() <= self.end else None
+        if deal.created_at >= deal.booked_at:
+            deal.created_at = clk.add_minutes(booked_at, -60 * 24 * 14)
+
+    def case(self, error, deal: Deal | None, rep: str, outcome: str, asks: list[str], note: str, **extra) -> dict:
+        number = sum(c["type"] == error for c in self.answer_key) + 1
+        row = {"case_id": f"{error}-{number:04d}", "type": error, "deal_id": deal.id if deal else None, "rep_id": rep,
+               "expected_outcome": outcome, "expected_amount_cents": None, "expected_asks": asks, "note": note, **extra}
+        self.answer_key.append(row)
+        if deal:
+            deal.tags.add(row["case_id"])
+        return row
+
+    def _in(self, first: str, last: str):
+        return lambda d: first <= d.booked_at[:10] <= last
+
+    def plant_E01(self):
+        """CRM amount higher than the signed contract ACV."""
+        deal = self.pick()
+        deal.crm_amount_cents = round(deal.acv_cents * self.rng.choice([1.15, 1.25, 1.4]) / 100_000) * 100_000
+        return self.case("E01", deal, deal.owner, "corrected", [], f"CRM {deal.crm_amount_cents} vs ACV {deal.acv_cents}")
+
+    def plant_E02(self):
+        """Deal splits sum to 110%."""
+        deal = self.pick()
+        partner = self.rng.choice([r.id for r in self.reps if r.id != deal.owner and r.id not in self.exclusive_reps])
+        deal.splits = [{"rep": deal.owner, "bps": 6000}, {"rep": partner, "bps": 5000}]
+        return self.case("E02", deal, deal.owner, "held", ["marcus.lee"], f"60% {deal.owner} + 50% {partner}")
+
+    def plant_E03(self):
+        """CRM close Mar 31, countersigned Apr 2; the rep disputes for Q1."""
+        deal = self.pick(self._in("2026-04-01", "2026-06-30"))
+        self.rebook(deal, f"2026-04-02T{self.rng.randint(10, 16)}:00:00Z")
+        deal.crm_close_date = "2026-03-31"
+        text = f"{deal.account} closed Mar 31. It should count in Q1."
+        self.actions.append({"at": "2026-05-05T10:00:00Z", "who": deal.owner, "do": "message",
+                             "to": "seat:commissions_analyst", "text": text})
+        self.extractions[text] = {"kind": "dispute", "deal_ref": deal.id, "line_ref": None, "field": "booking_date",
+                                  "asserted_value": "2026-03-31", "amount_cents": None,
+                                  "quote": f"{deal.account} closed Mar 31"}
+        return self.case("E03", deal, deal.owner, "held", [], "countersigned Apr 2; rep disputes for Q1")
+
+    def plant_E04(self):
+        """Close date backdated into a locked quarter after the lock."""
+        deal = self.pick(self._in("2026-04-13", "2026-05-29"))
+        at = clk.add_minutes(deal.booked_at, 60 * 24 * self.rng.randint(3, 10))
+        self.events.append((at, "deal.updated", {"deal_id": deal.id, "fields": {"crm_close_date": "2026-03-30"},
+                                                 "actor": deal.owner}))
+        return self.case("E04", deal, deal.owner, "escalated", ["marcus.lee", "priya.nair"],
+                         f"close date moved to 2026-03-30 at {at}, after the Q1 lock")
+
+    def plant_E05(self):
+        """A SPIF promised in chat by a manager without authority."""
+        rep = self.take_rep()
+        amount = self.rng.choice([1_500, 2_000, 2_500])
+        text = f"Morgan promised me a ${amount:,} SPIF for the Q1 push. When does it hit payroll?"
+        quote = f"Morgan promised me a ${amount:,} SPIF"
+        self.actions.append({"at": f"2026-03-{self.rng.randint(16, 26):02d}T11:00:00Z", "who": rep.id, "do": "message",
+                             "to": "seat:commissions_analyst", "text": text})
+        self.extractions[text] = {"kind": "spiff_claim", "deal_ref": None, "line_ref": None, "field": None,
+                                  "asserted_value": None, "amount_cents": amount * 100, "quote": quote}
+        return self.case("E05", None, rep.id, "escalated", ["marcus.lee"], f"${amount} SPIF promised by Morgan",
+                         scope="rep")
+
+    def plant_E06(self):
+        """Multi-year deal commissioned on TCV in the CRM."""
+        deal = self.pick(lambda d: d.term > 12)
+        deal.crm_amount_cents = deal.acv_cents * deal.term // 12
+        return self.case("E06", deal, deal.owner, "corrected", [], f"CRM shows TCV {deal.crm_amount_cents}")
+
+    def plant_E07(self):
+        """Customer 120 days late."""
+        deal = self.pick(self._in("2026-01-05", "2026-02-27"))
+        deal.paid_at = None
+        at = clk.add_minutes(deal.invoice_at, 60 * 24 * 120)
+        self.events.append((at, "payment.overdue", {"deal_id": deal.id, "days": 120}))
+        return self.case("E07", deal, deal.owner, "held", [], "no payment; 120 days late")
+
+    def plant_E08(self):
+        """Churn inside the 6-month clawback window."""
+        deal = self.pick(lambda d: d.term > 12 and "2026-01-05" <= d.booked_at[:10] <= "2026-02-27")
+        deal.paid_at = _ts(date.fromisoformat(deal.invoice_at[:10]) + timedelta(days=12), 60)
+        effective = min(clk.add_months(deal.booked_at[:10], self.rng.randint(3, 4)), "2026-06-25")
+        recognized = len(_months(deal.booked_at[:10], effective))     # booking month through churn month
+        refund = deal.acv_cents * (12 - recognized) // 12
+        self.events += [(f"{clk.add_days(effective + 'T10:00:00Z', -2)}", "customer.churned",
+                         {"deal_id": deal.id, "effective_date": effective, "reason": "termination_for_convenience",
+                          "refund_cents": refund}),
+                        (f"{effective}T18:00:00Z", "refund.issued", {"stripe_id": f"re_{deal.id}", "deal_id": deal.id,
+                                                                     "amount_cents": refund, "date": effective})]
+        return self.case("E08", deal, deal.owner, "escalated", ["priya.nair"], f"churned {effective}")
+
+    def plant_E09(self):
+        """Rep terminated before payout, California."""
+        rep = self.take_rep(lambda r: r.state == "CA" and any(
+            d.owner == r.id and len(d.splits) == 1 and "2026-04-01" <= d.booked_at[:10] <= "2026-05-25"
+            for d in self.deals))
+        end = "2026-06-24"
+        self.deals = [d for d in self.deals if not (d.owner == rep.id and d.booked_at[:10] > "2026-06-10")]
+        mine = [d for d in self.deals if d.owner == rep.id]
+        for deal in mine:
+            if deal.booked_at[:10] <= "2026-06-10":
+                deal.paid_at = _ts(date.fromisoformat(deal.invoice_at[:10]) + timedelta(days=10), 60)
+        case_deal = max((d for d in mine if d.booked_at[:10] <= "2026-05-25" and len(d.splits) == 1),
+                        key=lambda d: d.booked_at)
+        self.used_deals.add(case_deal.id)
+        self.events.append((f"{end}T17:00:00Z", "rep.terminated", {"rep_id": rep.id, "end_date": end, "state": rep.state}))
+        return self.case("E09", case_deal, rep.id, "posted", ["priya.nair"], f"{rep.id} left {end} ({rep.state})",
+                         scope="rep")
+
+    def plant_E10(self, moved=4, unchanged=2):
+        """Territory move half done by the Sales Ops bot."""
+        def has_pipeline(rep):
+            return sum(d.owner == rep.id and len(d.splits) == 1 and d.booked_at[:10] >= "2026-04-08"
+                       for d in self.deals) >= moved + unchanged
+        old = self.take_rep(has_pipeline)
+        new = self.take_rep()
+        deals = sorted([d for d in self.deals if d.owner == old.id and len(d.splits) == 1
+                        and d.booked_at[:10] >= "2026-04-08"], key=lambda d: d.booked_at)[:moved + unchanged]
+        at = "2026-04-01T09:00:00Z"
+        for deal in deals:
+            deal.created_at = min(deal.created_at, "2026-03-10T09:00:00Z")
+            self.used_deals.add(deal.id)
+        bot_moved, left = deals[:moved], deals[moved:]
+        for deal in bot_moved:
+            deal.created_as = {"owner_id": deal.owner, "splits": deal.splits}
+            deal.owner, deal.splits = new.id, [{"rep": new.id, "bps": 10000}]
+            self.events.append((at, "deal.updated", {"deal_id": deal.id, "actor": "salesops.bot",
+                                                     "fields": {"owner_id": new.id, "splits": deal.splits}}))
+        self.events.append((at, "rep.territory_changed", {"rep_id": new.id, "accounts": [d.id for d in deals],
+                                                         "effective_date": "2026-04-01", "actor": "salesops.bot"}))
+        return self.case("E10", left[0], old.id, "held", ["marcus.lee"],
+                         f"{moved + unchanged} accounts to {new.id}; {unchanged} not moved",
+                         deal_ids=[d.id for d in left], scope="move", moved_to=new.id)
+
+    def plant_E11(self):
+        """Same deal credited to two reps after a territory move."""
+        deal = self.pick(self._in("2026-04-01", "2026-06-25"))
+        other = self.rng.choice([r.id for r in self.reps if r.id != deal.owner and r.id not in self.exclusive_reps])
+        deal.splits = [{"rep": other, "bps": 10000}, {"rep": deal.owner, "bps": 10000}]
+        return self.case("E11", deal, deal.owner, "corrected", [], f"also credited 100% to {other}")
+
+    def plant_E12(self):
+        """Contract amendment raises ACV mid-term."""
+        deal = self.pick(lambda d: d.term > 12 and d.booked_at[:10] <= "2026-03-20")
+        increase = round(deal.acv_cents * self.rng.uniform(0.2, 0.5) / 100_000) * 100_000
+        at = f"2026-05-{self.rng.randint(12, 22):02d}T15:00:00Z"
+        self.events.append((at, "contract.amended", {"deal_id": deal.id, "signed_at": at,
+                                                     "terms": {"acv_cents": deal.acv_cents + increase,
+                                                               "kind": "amendment"}}))
+        return self.case("E12", deal, deal.owner, "posted", [], f"ACV +{increase} on {at[:10]}",
+                         amendment_key=f"{deal.id}+v2")
+
+    def plant_E13(self):
+        """Duplicate payment webhook."""
+        deal = self.pick(lambda d: d.paid_at is not None)
+        self.events.append((clk.add_minutes(deal.paid_at, 2), "payment.received",
+                            {"stripe_id": f"py_{deal.id}", "deal_id": deal.id, "amount_cents": deal.acv_cents,
+                             "date": deal.paid_at[:10]}))
+        return self.case("E13", deal, deal.owner, "posted", [], "payment webhook delivered twice")
+
+    def plant_E14(self):
+        """Plan YAML draft differs from the signed plan."""
+        rep = self.take_rep(lambda r: any(d.owner == r.id and d.booked_at[:10] >= "2026-04-06" and len(d.splits) == 1
+                                          for d in self.deals))
+        mine = [d for d in self.deals if d.owner == rep.id and d.booked_at[:10] >= "2026-04-06" and len(d.splits) == 1]
+        case_deal = max(mine, key=lambda d: d.booked_at)
+        self.used_deals.add(case_deal.id)
+        self.events.append(("2026-04-03T10:00:00Z", "plan.amended", {
+            "rep_id": rep.id, "version": 4, "signed_at": "",
+            "changes": {"rates": [{"tier": "base", "up_to_attainment": 1.0, "rate": 0.10},
+                                  {"tier": "accelerator", "above_attainment": 1.0, "rate": 0.20}]}}))
+        return self.case("E14", case_deal, rep.id, "escalated", ["marcus.lee"], "unsigned v4 raises the accelerator",
+                         scope="rep")
+
+    def plant_E15(self):
+        """Rep paid on a deal later voided."""
+        deal = self.pick(lambda d: d.term > 12 and "2026-01-05" <= d.booked_at[:10] <= "2026-02-20")
+        deal.paid_at = _ts(date.fromisoformat(deal.invoice_at[:10]) + timedelta(days=12), 60)
+        at = f"2026-04-{self.rng.randint(14, 28):02d}T11:00:00Z"
+        self.events.append((at, "deal.updated", {"deal_id": deal.id, "fields": {"stage": "voided"}, "actor": "crm.ops"}))
+        return self.case("E15", deal, deal.owner, "corrected", ["priya.nair"], f"voided {at[:10]} after payout")
+
+    def plant_E16(self):
+        """Payroll export differs from the approved lines by $340."""
+        deal = self.pick(self._in("2026-04-01", "2026-04-22"))
+        deal.paid_at = _ts(date.fromisoformat(deal.invoice_at[:10]) + timedelta(days=10), 60)
+        self.payroll_edits["2026-05"] = {"deal_id": deal.id, "cents": 34_000}
+        return self.case("E16", deal, deal.owner, "blocked", ["dana.ortiz"], "May export +$340 on this line")
+
     # ---------- events ----------
 
     def deal_events(self, deal: Deal) -> list[tuple[str, str, dict]]:
         fields = {"account": deal.account, "crm_amount_cents": deal.crm_amount_cents, "crm_close_date": None,
-                  "stage": "open", "owner_id": deal.owner, "splits": deal.splits}
+                  "stage": "open", "owner_id": deal.owner, "splits": deal.splits, **(deal.created_as or {})}
         out = [(deal.created_at, "deal.created", {"deal_id": deal.id, "fields": fields, "actor": deal.owner}),
                (clk.add_minutes(deal.booked_at, -30), "deal.updated",
                 {"deal_id": deal.id, "fields": {"stage": "closed_won", "crm_close_date": deal.crm_close_date},
@@ -186,7 +413,8 @@ class Fernhill:
         for period in _months(self.start, self.end):
             last = clk.period_end(period)
             job = lambda at, name: (f"{last}T{at}:00Z", "job.due", {"job": name, "period": period})
-            out += [job("20:00", "commission_run"), job("20:30", "commission_accrual"),
+            run = (f"{last}T20:00:00Z", "job.due", {"job": "commission_run", "period": period, "since": self.start[:7]})
+            out += [run, job("20:30", "commission_accrual"),
                     job("23:00", "revenue_recognition"), job("23:00", "amortization"), job("23:20", "churn_review")]
             if period > self.start[:7]:
                 out.append((f"{period}-14T17:00:00Z", "job.due", {"job": "payroll_file", "period": period}))
@@ -200,7 +428,7 @@ class Fernhill:
                 out.append({"at": lock_at, "who": "priya.nair", "do": "lock_period", "period": period})
             if period > self.start[:7]:
                 out.append({"at": f"{period}-15T17:00:00Z", "who": "dana.ortiz", "do": "release_payroll",
-                            "file": f"PR-{period}"})
+                            "file": f"PR-{period}", "export_adjust": self.payroll_edits.get(period)})
         return out
 
     def all_events(self) -> list[tuple[str, str, dict]]:

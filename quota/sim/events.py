@@ -50,7 +50,7 @@ EVENT_SCHEMAS = {
     "period.lock_requested": _schema({"period": STRING}),
     "clock.advance": _schema({"to": STRING}),
     "job.due": _schema({"job": {"type": "string", "enum": list(JOBS)}},
-                       {"period": STRING, "date": STRING, "approval_id": STRING}),
+                       {"period": STRING, "date": STRING, "approval_id": STRING, "since": STRING}),
 }
 
 _PY_TYPES = {"string": str, "integer": int, "object": dict, "array": list}

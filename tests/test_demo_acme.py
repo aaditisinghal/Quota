@@ -58,7 +58,7 @@ def test_demo_ids_and_amounts(acme_demo):
     decisions = {d["id"]: d for d in queries.fetch_all(ro, "SELECT * FROM decisions ORDER BY id")}
     assert [(d["kind"], d["outcome"]) for d in decisions.values()] == [
         ("commission_calc", "drafted"), ("dispute", "held"), ("dispute", "held"), ("escalation", "escalated"),
-        ("commission_calc", "drafted"), ("commission_accrual", "drafted"), ("clawback", "drafted")]
+        ("commission_calc", "drafted"), ("commission_accrual", "drafted"), ("clawback", "escalated")]
     d3 = json.loads(decisions["D-0003"]["output_json"])["result"]
     assert d3["no_new_evidence"] is True
     d1_res = json.loads(decisions["D-0001"]["resolutions_json"])

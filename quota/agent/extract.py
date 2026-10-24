@@ -107,6 +107,12 @@ def value_in_quote(value: str, quote: str) -> bool:
     return bool(wanted) and wanted <= numbers_in(quote)
 
 
+def _mentioned(ref: str, text: str) -> bool:
+    """A ref is named when it appears in the text, ignoring case and hyphens ("brisk-lantern" ~ "Brisk Lantern")."""
+    normalize = lambda s: s.lower().replace("-", " ")
+    return normalize(ref) in normalize(text)
+
+
 def verify_claim(raw: dict, text: str) -> Claim:
     """Accept a proposed claim only if it is grounded in the message; otherwise demote it to `other`."""
     problems = schema_errors(raw, CLAIM_SCHEMA)
@@ -124,7 +130,7 @@ def verify_claim(raw: dict, text: str) -> Claim:
         problem = f"amount {claim.amount_cents} cents is not written in the quote"
     else:
         for ref in (claim.deal_ref, claim.line_ref):
-            if ref is not None and ref.lower() not in text.lower():
+            if ref is not None and not _mentioned(ref, text):
                 problem = f"{ref} is not named in the message"
     if problem:
         return Claim("other", quote=claim.quote, problem=problem)

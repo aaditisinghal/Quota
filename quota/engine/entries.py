@@ -65,7 +65,7 @@ def payroll_payment_entry(file, date):
                   [_line("2150", debit=total, ref=file_id), _line("1000", credit=total, ref=file_id)])
 
 
-def clawback_entry(line, total, amortized, date, recoverable: bool):
+def clawback_entry(line, total, amortized, date, recoverable: bool, kind="clawback"):
     line_id, rep_id = line["id"], line["rep_id"]
     unamortized = total - amortized
     if recoverable:
@@ -73,7 +73,7 @@ def clawback_entry(line, total, amortized, date, recoverable: bool):
                  _line("6110", credit=amortized, ref=line_id)]
     else:
         lines = [_line("6110", debit=unamortized, ref=line_id), _line("1350", credit=unamortized, ref=line_id)]
-    return _entry("clawback", date, f"{line_id} {'recover from rep' if recoverable else 'write off'}", lines)
+    return _entry(kind, date, f"{line_id} {'recover from rep' if recoverable else 'write off'}", lines)
 
 
 def is_recoverable(plan: Plan, booking_date: str, churn_date: str, trigger: str) -> bool:
@@ -137,3 +137,28 @@ def clawback_decision(rows, line_id, now) -> dict:
             "resolutions": {"booking_date": ranking.to_dict(booking)},
             "precedent_ids": [booking.source.split(":", 1)[1]] if booking.basis == "precedent" else [],
             "schedule_id": schedule_row["id"]}
+
+
+def void_decision(rows, line_id, now) -> dict:
+    """E15: a deal voided after its commission was paid: the commission was never earned, so it is recovered in
+    full in the open period (a receivable from the rep), whatever the clawback clause says. Amortization posted
+    before the void month is reversed with the unamortized asset."""
+    line = _find(rows, "commission_lines", line_id)
+    deal = _find(rows, "deals", line["deal_id"])
+    void_date = deal["known_at"][:10]
+    schedules = [s for s in rows.get("amortization_schedules", []) if s["line_id"] == line_id and s["status"] == "active"]
+    if schedules:
+        amortized = amortization.amortized_through(json.loads(schedules[0]["schedule_json"]),
+                                                   clk.add_periods(clk.period_of(void_date), -1))
+        entry = clawback_entry(line, line["amount_cents"], amortized, void_date, True, kind="void_reversal")
+    else:   # expensed when incurred (term <= 12 months): recover it from 6115
+        amortized = None
+        entry = _entry("void_reversal", void_date, f"{line_id} recover from rep",
+                       [_line("1290", debit=line["amount_cents"], ref=line["rep_id"]),
+                        _line("6115", credit=line["amount_cents"], ref=line_id)])
+    output = {"fn": "void_entry",
+              "args": {"line_id": line_id, "total_cents": line["amount_cents"], "amortized_cents": amortized,
+                       "date": void_date, "recoverable": True, "stage": deal["stage"]},
+              "result": entry}
+    return {"output": output, "entry": entry, "resolutions": {}, "precedent_ids": [],
+            "schedule_id": schedules[0]["id"] if schedules else None}
