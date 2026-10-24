@@ -93,9 +93,9 @@ class RuleExtractor:
         deal = find_deal(text, deals)
         line = re.search(r"\bCL-\d{4}\b", text, re.I)
         date, money = find_date(text, year), find_money(text)
-        if SPIFF_WORDS.search(text) and money:
-            return blank_claim("spiff_claim", deal_ref=deal, field="amount", amount_cents=money[0],
-                               quote=sentence_with(text, money[1]))
+        if spiff := SPIFF_WORDS.search(text):
+            return blank_claim("spiff_claim", deal_ref=deal, field="amount", amount_cents=money[0] if money else None,
+                               quote=sentence_with(text, money[1] if money else spiff.group(0)))
         kind = "exception_grant" if GRANT_WORDS.search(text) else "dispute"
         ref = {"deal_ref": deal, "line_ref": line.group(0).upper() if line else None}
         if date and (deal or line or re.search(r"\b(closed|signed|booked|count)\b", text, re.I)):

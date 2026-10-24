@@ -132,3 +132,23 @@ def test_messages_filter_by_principal(finished):
     jordan = finished.get("/messages?principal=jordan.kim").json()
     assert jordan and all("jordan.kim" in (m["author"], m["to"]) for m in jordan)
     assert len(finished.get("/messages").json()) > len(jordan)
+
+
+def test_the_built_screens_are_served_at_the_root():
+    session = acme_session()
+    try:
+        client = TestClient(create_app(session))
+        page = client.get("/")
+        assert page.status_code == 200 and '<div id="root">' in page.text
+        assert client.get("/state").json()["world"] == "acme"          # API routes win over the static mount
+    finally:
+        session.close()
+
+
+def test_deal_and_account_traces(finished):
+    deal = finished.get("/trace/deal/acme").json()
+    assert deal["root"] == "deal:acme" and {"CL-0001", "CL-0002", "CL-0003"} <= {n["id"] for n in deal["nodes"]}
+    account = {n["id"]: n for n in finished.get("/trace/account/1290").json()["nodes"]}
+    assert account["account:1290"]["amount_cents"] == 1_800_000 and "JE-0012" in account
+    april = finished.get("/trace/account/1350?as_of=2026-04-30T23:59:00Z").json()["nodes"][0]
+    assert april["amount_cents"] == 1_800_000 - 50_000                    # accrual less April's amortization

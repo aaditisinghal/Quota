@@ -183,6 +183,7 @@ class Graph:
             return None
         decided = queries.approval_decision(self.ro, approval_id, self.as_of)
         if not self.node(approval_id, "approval", f"{approval_id} {approval['kind']} {approval['subject_id']}",
+                         approval_kind=approval["kind"], subject=approval["subject_id"],
                          amount_cents=approval["amount_cents"], approver=approval["approver"],
                          requested_by=approval["requested_by"], known_at=approval["known_at"],
                          decision=decided["decision"] if decided else "pending",
@@ -267,6 +268,34 @@ class Graph:
             self.edge(schedule_id, self._line(schedule["line_id"], depth - 1), "amortizes")
         return schedule_id
 
+    def _deal(self, deal_id, depth):
+        deal = self.get("deals", deal_id)
+        if deal is None:
+            return None
+        node_id = f"deal:{deal_id}"
+        if not self.node(node_id, "deal", f"{deal_id} {deal['account']}", amount_cents=deal["crm_amount_cents"],
+                         snippet={k: v for k, v in deal.items() if k not in HIDDEN}, known_at=deal["known_at"])                 or depth <= 0:
+            return node_id
+        for line in queries.fetch_all(self.ro, "SELECT id FROM commission_lines WHERE deal_id = ? ORDER BY id",
+                                      (deal_id,)):
+            self.edge(node_id, self._line(line["id"], depth - 1), "line")
+        return node_id
+
+    def _account(self, account, depth):
+        """A trial-balance figure: the account's balance as of the slider, and the posted entries behind it."""
+        if account not in config.ACCOUNTS:
+            return None
+        node_id = f"account:{account}"
+        entries = [e for e in queries.journal(self.ro, self.as_of) if e["status"] == "posted"
+                   and any(l["account"] == account for l in e["lines"])]
+        balance = sum(l["debit_cents"] - l["credit_cents"] for e in entries for l in e["lines"] if l["account"] == account)
+        if not self.node(node_id, "account", f"{account} {config.ACCOUNTS[account][0]}", amount_cents=balance,
+                         entries=len(entries)) or depth <= 0:
+            return node_id
+        for entry in entries:
+            self.edge(node_id, self._je(entry["id"], 0), "posted in")
+        return node_id
+
     def _event(self, event_id, depth):
         event = self.get("events", event_id)
         if event is None:
@@ -278,7 +307,7 @@ class Graph:
 
 def trace(ro, kind: str, object_id: str, as_of: str | None = None, depth: int = 3) -> dict:
     graph = Graph(ro, as_of)
-    if kind not in set(ID_KINDS.values()):
+    if kind not in set(ID_KINDS.values()) | {"deal", "account"}:
         raise KeyError(f"unknown kind {kind}")
     root = graph.expand(kind, object_id, depth)
     return {"root": root, "requested": object_id, "kind": kind, "as_of": as_of, "known": root is not None,

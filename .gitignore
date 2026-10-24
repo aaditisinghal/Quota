@@ -10,3 +10,6 @@ runs/
 .env
 .env.*
 !.env.example
+
+# browser walkthrough reports (gstack /browse)
+.gstack/
