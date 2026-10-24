@@ -251,3 +251,52 @@ def test_a_failing_event_is_logged_and_does_not_poison_the_world(client, monkeyp
     monkeypatch.undo()
     _, later = inject(client, "Advance the clock to April 29")                   # the world keeps going
     assert not kinds(later, "ERROR")
+
+
+# ---------- the clawback receivable nets against the next payout (SPEC worked example) ----------
+
+@pytest.mark.parametrize("acv", [20_000_000, 5_000_000])
+def test_a_clawback_receivable_nets_against_the_reps_next_payroll(acv):
+    session = acme_session(cast=False)
+    client = TestClient(create_app(session, static_dir="no-static"))
+    try:
+        inject(client, "Acme churns in June and wants its money back")          # clawback CL-0002, $12,000 in 1290
+        world = session.world
+        q = world.queue
+        q.schedule("2026-07-01T16:00:00Z", "deal.created", {"deal_id": "zinc", "actor": "jordan.kim", "fields": {
+            "account": "Zinc Labs", "crm_amount_cents": acv, "crm_close_date": "2026-07-01",
+            "stage": "closed_won", "owner_id": "jordan.kim", "splits": [{"rep": "jordan.kim", "bps": 10000}]}})
+        q.schedule("2026-07-02T16:00:00Z", "contract.countersigned", {
+            "deal_id": "zinc", "timestamp": "2026-07-02T16:00:00Z", "acv_cents": acv, "term_months": 24,
+            "clauses": {}})
+        q.schedule("2026-07-03T16:00:00Z", "invoice.issued", {"stripe_id": "zinc-inv-1", "deal_id": "zinc",
+                                                              "amount_cents": acv, "date": "2026-07-03"})
+        q.schedule("2026-07-10T16:00:00Z", "payment.received", {"stripe_id": "zinc-pay-1", "deal_id": "zinc",
+                                                                "amount_cents": acv, "date": "2026-07-10"})
+        for at, job in [("2026-07-27T16:00:00Z", "commission_run"), ("2026-07-31T23:05:00Z", "commission_accrual"),
+                        ("2026-08-14T17:00:00Z", "payroll_file")]:
+            q.schedule(at, "job.due", {"job": job, "period": "2026-07" if job != "payroll_file" else "2026-08"})
+        world.people.actions.append({"at": "2026-08-15T17:00:00Z", "who": "dana.ortiz", "do": "release_payroll",
+                                     "file": "PR-2026-08"})
+        world.run_until("2026-08-15T23:59:59Z")
+        ro = session.ro
+        recovery = queries.fetch_one(ro, "SELECT * FROM commission_lines WHERE amount_cents < 0")
+        payroll = queries.as_of(ro, "payroll_files", "PR-2026-08", None)
+        lines = {pl["line_id"]: pl["amount_cents"] for pl in queries.loads(payroll["lines_json"])}
+        note = queries.fetch_one(ro, "SELECT text FROM messages WHERE to_principal = 'dana.ortiz' "
+                                     "AND text LIKE 'PR-2026-08 recoveries%'")
+        if acv == 5_000_000:                        # $500 of new commission cannot cover $12,000: it stays in 1290
+            assert recovery["id"] not in lines and payroll["total_cents"] == 500_000
+            assert queries.trial_balance(ro)["1290"] == 1_200_000 and "still due in 1290" in note["text"]
+            assert_books_clean(client)
+            return
+        assert lines[recovery["id"]] == -1_200_000 and payroll["total_cents"] == 2_000_000 - 1_200_000
+        entry = next(e for e in queries.journal(ro) if e["source_ref"] == "PR-2026-08")
+        assert {(l["account"], l["debit_cents"], l["credit_cents"]) for l in entry["lines"]} == {
+            ("2150", 2_000_000, 0), ("1290", 0, 1_200_000), ("1000", 0, 800_000)}
+        assert queries.line_status(ro, recovery["id"]) == "paid"
+        assert queries.trial_balance(ro).get("1290", 0) == 0
+        assert note and "netted against new commission" in note["text"]
+        assert_books_clean(client)
+    finally:
+        session.close()

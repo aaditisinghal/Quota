@@ -60,9 +60,23 @@ def amortization_entry(line, amount, period_end):
 
 
 def payroll_payment_entry(file, date):
+    """Pay the file's commissions out of 2150. Recovery lines in the file (a clawback netted against new
+    commission) settle the rep's receivable in 1290, so only the net leaves cash."""
     file_id, total = file["id"], file["total_cents"]
-    return _entry("payroll_payment", date, file_id,
-                  [_line("2150", debit=total, ref=file_id), _line("1000", credit=total, ref=file_id)])
+    lines = file.get("lines_json") or []
+    lines = json.loads(lines) if isinstance(lines, str) else lines
+    payable = sum(l["amount_cents"] for l in lines if l["amount_cents"] > 0)
+    netted = -sum(l["amount_cents"] for l in lines if l["amount_cents"] < 0)
+    if not netted:
+        return _entry("payroll_payment", date, file_id,
+                      [_line("2150", debit=total, ref=file_id), _line("1000", credit=total, ref=file_id)])
+    out = [_line("2150", debit=payable, ref=file_id)]
+    for rep in sorted({l["rep_id"] for l in lines if l["amount_cents"] < 0}):
+        out.append(_line("1290", credit=-sum(l["amount_cents"] for l in lines
+                                              if l["rep_id"] == rep and l["amount_cents"] < 0), ref=rep))
+    if total:
+        out.append(_line("1000", credit=total, ref=file_id))
+    return _entry("payroll_payment", date, file_id, out)
 
 
 def clawback_entry(line, total, amortized, date, recoverable: bool, kind="clawback"):

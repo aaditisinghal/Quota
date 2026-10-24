@@ -5,7 +5,7 @@ import json
 import re
 
 from quota import config
-from quota.ledger import hashing, invariants, queries
+from quota.ledger import cascade, hashing, invariants, queries
 from quota.timeline import format_line
 
 ID_KINDS = {"JE": "je", "CL": "line", "D": "decision", "A": "approval", "P": "precedent", "PR": "payroll",
@@ -355,6 +355,8 @@ def health(world) -> dict:
                           "debits_cents": sum(b for b in tb.values() if b > 0),
                           "credits_cents": -sum(b for b in tb.values() if b < 0)},
         "tie_outs": tie_outs(ro),
+        "cascades": [{"deal": deal, "items": items} for deal in cascade.churned_deals(ro)
+                     if (items := cascade.churn_cascade(ro, deal))],
         "periods": sorted(periods.values(), key=lambda p: p["period"]),
     }
 

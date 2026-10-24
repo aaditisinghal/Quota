@@ -222,3 +222,7 @@ details.fold { display: inline; }
 .tl.kind-error { background: var(--line-2); border-left: 3px solid var(--bad); }
 .tl.kind-error .kind { color: var(--bad); font-weight: 700; }
 .person .away { font-size: 11px; color: var(--ink-3); }
+.cascade { border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px 10px; margin-bottom: 16px; }
+.cascade ol { margin: 4px 0; padding-left: 22px; }
+.cascade li { margin: 3px 0; }
+.cascade-label { display: inline-block; min-width: 190px; font-weight: 600; }

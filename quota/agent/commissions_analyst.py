@@ -98,6 +98,15 @@ class CommissionsAnalyst(Seat):
         # Two sources can carry the same alternative (contract + e-sign countersignature); print it once.
         alternatives = list(dict.fromkeys(alt_text(d) for res in calc["resolved"].values() for d in res.disagreements))
         explanation = text + ("; disagreements: " + "; ".join(alternatives) if alternatives else "")
+        # SPEC "When to ask": a disagreement is material above $500 or 2% of the payout. The source ranking is the
+        # written rule that settles it, so nobody is asked; the record says it was material.
+        effects = [abs(d["effect_cents"]) for res in calc["resolved"].values() for d in res.disagreements
+                   if d["effect_cents"] is not None]
+        threshold = min(config.MATERIALITY_CENTS,
+                        abs(calc["result"].amount_cents) * config.MATERIALITY_BPS_OF_PAYOUT // 10000)
+        if effects and max(effects) > threshold:
+            explanation += (f"; material ({fmt_usd(max(effects))} > {fmt_usd(threshold)}), settled by the source "
+                            f"ranking")
         subject = f"{key or deal_id}/{rep_id}"
         decision_id = self.wp.record_decision(
             self.principal, "commission_calc", subject, queries.input_refs(rows), calc["resolutions"],
@@ -682,8 +691,23 @@ class CommissionsAnalyst(Seat):
         """Approved positive lines on collected deals (the plan pays on collection). Recoveries (negative lines)
         stay in 1290 rather than netting through payroll."""
         held = self.payroll_held()
-        return [l["id"] for l in self.lines() if l["amount_cents"] > 0 and l["id"] not in held
-                and self.line_status(l["id"]) == "approved" and queries.collected(self.ro, l["deal_id"], self.now)]
+        payable = [l for l in self.lines() if l["amount_cents"] > 0 and l["id"] not in held
+                   and self.line_status(l["id"]) == "approved" and queries.collected(self.ro, l["deal_id"], self.now)]
+        # SPEC worked example: a rep's approved recovery (a clawback in 1290) is netted against their new
+        # commission in the next payroll, oldest first, as far as that commission covers whole recoveries; the
+        # rest stays in 1290 and Payroll is told.
+        netted, left = [], []
+        for rep in sorted({l["rep_id"] for l in self.lines() if l["amount_cents"] < 0}):
+            room = sum(l["amount_cents"] for l in payable if l["rep_id"] == rep)
+            for recovery in [l for l in self.lines(rep_id=rep) if l["amount_cents"] < 0
+                             and self.line_status(l["id"]) == "approved"]:
+                if room > 0 and -recovery["amount_cents"] <= room:
+                    netted.append(recovery)
+                    room += recovery["amount_cents"]
+                else:
+                    left.append(recovery)
+        ctx.data["left_in_1290"] = left if payable else []
+        return [l["id"] for l in payable + netted]
 
     def write_payroll_file(self, ctx):
         if not ctx.res:
@@ -698,6 +722,18 @@ class CommissionsAnalyst(Seat):
         if clk.add_days(self.now, config.PAYROLL_BLOCKING_DAYS)[:10] >= pay_date:   # blocks a payroll: don't wait
             self.send(approver, f"{approval_id} blocks payroll {file_id} ({fmt_usd(total)}), which releases on "
                                 f"{pay_date}. Please decide it before then.")
+        recovered = [lid for lid in ctx.res if self.get("commission_lines", lid)["amount_cents"] < 0]
+        left = ctx.data.get("left_in_1290", [])
+        if recovered or left:
+            note = []
+            if recovered:
+                note.append("netted against new commission in this file: " + ", ".join(
+                    f"{l['id']} {config.display_name(l['rep_id'])} {fmt_usd(-l['amount_cents'])}"
+                    for l in (self.get("commission_lines", lid) for lid in recovered)))
+            if left:
+                note.append("still due in 1290 (no commission to net it against yet): " + ", ".join(
+                    f"{l['id']} {config.display_name(l['rep_id'])} {fmt_usd(-l['amount_cents'])}" for l in left))
+            self.send(routing.owner("payroll_release"), f"{file_id} recoveries: " + "; ".join(note) + ".")
         return []
 
     # ---------- job.due approver_digest / approval_followup ----------

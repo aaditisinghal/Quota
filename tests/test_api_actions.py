@@ -79,6 +79,10 @@ def test_the_spec_demo_flow_through_the_api_gives_the_scripted_books(plain):
     assert all(e["status"] == "posted" for e in queries.journal(session.ro))
     health = client.get("/ledger/health").json()
     assert all(i["ok"] for i in health["invariants"]) and all(t["ok"] for t in health["tie_outs"])
+    cascade = health["cascades"][0]                       # SPEC "one event, eight numbers", on the health screen
+    assert cascade["deal"] == "acme" and len(cascade["items"]) == 8
+    assert cascade["items"][0]["text"] == "$90,000.00 -> $0.00 (refund JE-0011)"
+    assert cascade["items"][4]["label"] == "Jordan commission" and "-$18,000.00 clawback" in cascade["items"][4]["text"]
     trace = {n["id"]: n for n in client.get("/trace/line/CL-0003").json()["nodes"]}
     assert trace["CL-0003"]["amount_cents"] == -1_800_000 and trace["D-0007"]["replay"] == "MATCH"
 

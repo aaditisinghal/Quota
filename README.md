@@ -63,8 +63,10 @@ column.
 - Seed 1729 was chosen by the builder, not hidden by a teammate.
 - Straight-through counts lines approved or paid with no hold, escalation or dispute; the Controller's routine
   approval of accrual and payroll batches is not counted as a human touch.
-- Not built yet: the SEC 10-K policy citations. The "attack your own controls" exercise is below, run as tests
-  rather than by a separate agent.
+- Not built yet: the SEC 10-K policy citations (SEC EDGAR refuses automated reads without a declared contact),
+  manager overrides and the 1350/1450 current vs noncurrent split (both on SPEC's cut list), and turning repeated
+  precedents into proposed plan changes. The "attack your own controls" exercise is below, run as tests rather
+  than by a separate agent.
 
 ## Screens
 
@@ -131,6 +133,14 @@ What broke, and is now fixed with a regression test (`tests/test_spec_pressure.p
 | SPEC's invariant 3 (subledgers tie to the GL) was only a screen | `INV3` is checked with the others (`verify`, the demo report, Ledger health): eight invariants |
 | One bad injected event (an unknown deal) crashed the seat and every later request (HTTP 500) | The injector validates ids, amounts, dates and the plan-year horizon; a served world logs any failing event as ERROR and moves on |
 | `/trace?as_of=garbage` was read as the far future; chat could message nobody | Both refused with 422 |
+
+| A clawback receivable sat in 1290 forever | The next payroll nets it against the rep's new commission (Dr 2150 / Cr 1290 / Cr 1000 net), oldest recovery first; what new commission cannot cover stays in 1290 and Payroll is told |
+| The eight-number churn cascade existed only in the CLI | Ledger health shows it for every churned deal, each figure linked to its trace |
+| Materiality ($500 / 2%) was configured but unused | A commission decision whose sources disagree by more than that says so in its explanation; the source ranking still settles it (E01: asks nobody) |
+
+Verified beyond the tests: `serve --live` against Claude Opus 5.5 (free-form chat read correctly, the model
+parses injected sentences, code prices them, invariants and replay clean), `serve --stripe` with the cast (real
+sandbox invoices, payments and the refund, Stripe ids on every billing row), and `serve --world fernhill`.
 
 The control tests try each forbidden action (seats or reps approving, the VP over his limit, the wrong approver,
 second decisions, posting into a locked period, lines without decisions or with bad splits, payroll edits, raw

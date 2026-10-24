@@ -104,6 +104,23 @@ function HealthPanel({ health }: { health: Health }) {
   return (
     <div className="panel">
       <h2>Ledger health</h2>
+      {health.cascades.map((c) => (
+        <div key={c.deal} className="cascade">
+          <h3>
+            One event, eight numbers: {c.deal} churned <span className="muted">every check below stays green</span>
+          </h3>
+          <ol>
+            {c.items.map((item) => (
+              <li key={item.label}>
+                <span className="cascade-label">{item.label}</span>
+                <span>
+                  <Rich text={item.text} trace={item.trace} />
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ))}
       <div className="checks">
         {health.invariants.map((i) => (
           <div key={i.name} className={`check ${i.ok ? "ok" : "bad"}`} title={i.violations.map((v) => `${v.subject}: ${v.detail}`).join("\n")}>

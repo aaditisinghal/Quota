@@ -72,6 +72,7 @@ export type Health = {
     credits_cents: number;
   };
   tie_outs: { name: string; subledger: string; gl_cents: number; subledger_cents: number; ok: boolean }[];
+  cascades: { deal: string; items: { label: string; text: string; trace: string | null }[] }[];
   periods: { period: string; status: string; since: string; by: string }[];
 };
 

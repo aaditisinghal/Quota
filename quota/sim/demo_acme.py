@@ -5,20 +5,18 @@ seats do everything else by picking events off their queues and running the seve
 only builds the world, runs the clock and prints the step 24 report from the ledger.
 """
 
-import json
 from pathlib import Path
 
 import yaml
 
-from quota import clock as clk
 from quota import config
 from quota.agent.commissions_analyst import CommissionsAnalyst
 from quota.agent.deferred_accountant import DeferredAccountant
 from quota.agent.extract import ModelExtractor, ScriptedExtractor
 from quota.agent.personas import LivePeople, ScriptedPeople
 from quota.engine.plans import normalize
-from quota.ledger import hashing, invariants, queries
-from quota.money import fmt_pct, fmt_usd
+from quota.ledger import cascade, hashing, invariants, queries
+from quota.money import fmt_usd
 from quota.sim import seed_acme
 from quota.sim.world import World
 
@@ -111,54 +109,11 @@ class AcmeDemo:
         clawbacks = [d["id"] for d in decisions if d["kind"] == "clawback"]
         return list(dict.fromkeys(calcs[:1] + calcs[-1:] + clawbacks[:1]))
 
-    def _account_total(self, account, subledger_ref, exclude=()):
-        return sum(l["debit_cents"] - l["credit_cents"] for e in queries.journal(self.ro)
-                   if e["status"] == "posted" and e["id"] not in exclude
-                   for l in e["lines"] if l["account"] == account and l["subledger_ref"] == subledger_ref)
-
     def cascade(self) -> list[str]:
-        journal = [e for e in queries.journal(self.ro) if e["status"] == "posted"]
-        refund = next((e for e in journal if queries.memo_kind(e["memo"]) == "refund"
-                       and e["lines"][0]["subledger_ref"] == DEAL), None)
-        clawback_line = next((l for l in queries.fetch_all(self.ro, "SELECT * FROM commission_lines ORDER BY id")
-                              if l["deal_id"] == DEAL and l["amount_cents"] < 0), None)
-        clawback = clawback_line and next((e for e in journal if queries.memo_kind(e["memo"]) == "clawback"
-                                           and e["decision_id"] == clawback_line["decision_id"]), None)
-        if refund is None or clawback is None:   # possible in --live, where people may decide otherwise
+        items = cascade.churn_cascade(self.ro, DEAL)
+        if items is None:                    # possible in --live, where people may decide otherwise
             return ["Acme churn: what changed", "  (no posted refund and clawback for acme; nothing to cascade)"]
-        clawback_lines = {l["account"]: l for l in clawback["lines"]}
-        churn = json.loads(queries.fetch_one(self.ro, "SELECT payload_json FROM events WHERE type = 'customer.churned'")
-                           ["payload_json"])
-        contract = queries.as_of(self.ro, "contracts", DEAL, None)
-        monthly = contract["acv_cents"] // 12
-        recognized = len([e for e in journal if queries.memo_kind(e["memo"]) == "revenue"
-                          and e["lines"][0]["subledger_ref"] == DEAL])
-        remaining = monthly * (contract["term_months"] - recognized)
-        clawed = queries.as_of(self.ro, "commission_lines", clawback_line["corrects_id"], None)
-        booked = json.loads(queries.as_of(self.ro, "decisions", clawed["decision_id"], None)["output_json"])["result"]
-        plan = queries.fetch_one(self.ro, "SELECT config_json FROM plans WHERE rep_id = ? ORDER BY version DESC", (REP,))
-        quota_cents = json.loads(plan["config_json"])["quota"]["amount"] * 100
-        q1_after = (booked["prior_credit_cents"] + booked["credit_cents"] + clawback_line["credit_cents"]) \
-            * 10000 // quota_cents
-        deferred_before = -self._account_total("2400", DEAL, exclude=(refund["id"],))
-        deferred_after = -self._account_total("2400", DEAL)
-        cash_effect = sum(l["debit_cents"] - l["credit_cents"] for l in refund["lines"] if l["account"] == "1000")
-        items = [
-            ("Deferred revenue", f"{fmt_usd(deferred_before)} -> {fmt_usd(deferred_after)} (refund {refund['id']})"),
-            ("Cash", f"{fmt_usd(cash_effect)} ({refund['id']})"),
-            ("Acme customer balance", f"{fmt_usd(self._account_total('1200', DEAL))}, contract terminated "
-                                      f"{churn['effective_date']}"),
-            ("Revenue forecast", f"{fmt_usd(-monthly)}/month from {clk.add_periods(churn['effective_date'][:7], 1)} "
-                                 f"({fmt_usd(-remaining)} remaining contract)"),
-            ("Jordan commission", f"{fmt_usd(clawback_line['amount_cents'])} clawback ({clawback_line['id']}, "
-                                  f"{clawback['id']})"),
-            ("Deferred commission", f"{fmt_usd(clawback_lines['1350']['credit_cents'])} written off ({clawback['id']})"),
-            ("Commission expense", f"{fmt_usd(-clawback_lines['6110']['credit_cents'])} amortization reversed "
-                                   f"({clawback['id']})"),
-            ("Jordan Q1 attainment", f"{fmt_pct(booked['attainment_after_bps'])} -> {fmt_pct(q1_after)} (report only; "
-                                     "2026-Q1 periods locked)"),
-        ]
-        return ["Acme churn: what changed"] + [f"  {n}. {label:<24}{text}" for n, (label, text) in
+        return ["Acme churn: what changed"] + [f"  {n}. {i['label']:<24}{i['text']}" for n, i in
                                                enumerate(items, start=1)]
 
     @property
