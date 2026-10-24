@@ -25,3 +25,12 @@ One line per choice made where IMPLEMENTATION.md was silent or ambiguous.
 - Step 2: unknown ids raise KeyError/ValueError (caller bug) rather than a refusal.
 - Step 2: `trial_balance` returns only accounts with posted activity (so 6115 is absent from the demo TB, matching section 9).
 - Step 2: bare dates in precedent windows cover the whole day (expires 2026-06-30 means through 2026-06-30T23:59:59Z).
+- Step 3: `Resolution` has one extra field, `basis` (which rung won: countersignature, contract_date, crm_close_date, contract, crm, precedent); disagreements carry it too. It drives the printed `booking=countersignature` text.
+- Step 3: the countersignature rung also reads the e-sign `countersigned` event (after `contract.countersigned_at`); it only becomes a disagreement if it differs.
+- Step 3: contract ids equal deal ids (`contracts:acme:v1`).
+- Step 3: the logic that builds a decision from fact rows (`calculator.commission_decision`, `entries.accrual_decision`, `entries.clawback_decision`, `disputes.dispute_decision`) lives in the engine, so the seat and replay call the same pure function on the same input rows.
+- Step 3: dispute evidence refs are compared as `table:id:vN` for versioned rows and `table:id` otherwise, so citing a new contract version counts as new evidence.
+- Step 3: an `escalate` message carries only the line; the seat reuses the claim from the prior dispute decision.
+- Step 3: the benefit period starts in the period the commission is accrued (2026-04 for CL-0002), not the booking date.
+- Step 3: the clawback trigger is the churn event's `reason` (fallback `churn`); the amortized amount is the schedule through the churn period.
+- Step 3: entry builders drop zero-amount lines (e.g. a clawback with nothing amortized yet).

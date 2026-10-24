@@ -9,7 +9,7 @@ from typing import NoReturn
 
 from quota import clock as clk
 from quota import config
-from quota.engine import routing
+from quota.engine import entries, routing
 from quota.ledger import hashing, queries
 from quota.ledger.invariants import entry_balanced
 
@@ -415,11 +415,10 @@ class WritePath:
             codes.append("INV2_PERIOD_LOCKED")
         self._check(actor, "release_payroll", file_id, codes,
                     f"release {file_id}; mismatched lines: {', '.join(mismatched) or 'none'}")
-        total = payroll["total_cents"]
-        lines = [{"account": "2150", "debit_cents": total, "credit_cents": 0, "subledger_ref": file_id},
-                 {"account": "1000", "debit_cents": 0, "credit_cents": total, "subledger_ref": file_id}]
+        entry = entries.payroll_payment_entry(payroll, today)
         with self.conn:
-            je_id = self._insert_entry(actor, today, f"payroll_payment: {file_id}", lines, None, file_id, None)
+            je_id = self._insert_entry(actor, entry["effective_date"], entry["memo"], entry["lines"], None,
+                                       file_id, None)
             self._insert("je_status", {"je_id": je_id, "status": "posted", "actor": actor,
                                        "known_at": self.clock.now()})
             for pl in payroll_lines:
