@@ -19,15 +19,17 @@ from quota.timeline import entry_text, format_line
 
 
 class BillingSystem:
-    """system:billing, the simulated ERP: mirrors invoices, payments and refunds and recognizes revenue."""
+    """system:billing, the ERP: mirrors invoices, payments and refunds and recognizes revenue. With a Stripe
+    sandbox attached (`--stripe`), each one is first created in Stripe and mirrored with its Stripe id."""
 
     principal = "system:billing"
     handles = frozenset({"invoice.issued", "payment.received", "refund.issued", "job.due"})
     KINDS = {"invoice.issued": ("invoice", entries.invoice_entry), "payment.received": ("payment", entries.payment_entry),
              "refund.issued": ("refund", entries.refund_entry)}
 
-    def __init__(self, world):
+    def __init__(self, world, stripe=None):
         self.world = world
+        self.stripe = stripe
 
     def _post(self, entry, source_ref) -> str:
         wp = self.world.wp
@@ -53,14 +55,24 @@ class BillingSystem:
     def _mirror(self, ev):
         p = ev.payload
         if queries.as_of(self.world.ro, "billing", p["stripe_id"], None) is not None:
-            return                                   # the same webhook twice counts once
+            return                                   # the same webhook twice counts once (and never reaches Stripe)
         kind, builder = self.KINDS[ev.type]
+        now, external_ref = self.world.clock.now(), p["stripe_id"]
+        if self.stripe is not None:
+            if kind == "invoice":
+                account = queries.as_of(self.world.ro, "deals", p["deal_id"], now)["account"]
+                external_ref = self.stripe.invoice(p["deal_id"], account, p["amount_cents"], now)
+            elif kind == "payment":
+                external_ref = self.stripe.pay(p["deal_id"], now)
+            else:
+                external_ref = self.stripe.refund(p["deal_id"], p["amount_cents"], now, p["stripe_id"])
         self.world.wp.append_fact("billing", {"id": p["stripe_id"], "kind": kind, "deal_id": p["deal_id"],
-                                              "amount_cents": p["amount_cents"], "at": self.world.clock.now(),
-                                              "external_ref": p["stripe_id"]}, self.principal)
+                                              "amount_cents": p["amount_cents"], "at": now,
+                                              "external_ref": external_ref}, self.principal)
         entry = builder(p["deal_id"], p["amount_cents"], p["date"])
         je_id = self._post(entry, p["stripe_id"])
-        self.world.emit(self.principal, "ENTRY", f"{je_id} posted {kind} {p['deal_id']} ({p['stripe_id']}): "
+        stripe_note = f", Stripe {external_ref}" if external_ref != p["stripe_id"] else ""
+        self.world.emit(self.principal, "ENTRY", f"{je_id} posted {kind} {p['deal_id']} ({p['stripe_id']}{stripe_note}): "
                                                  f"{entry_text(entry['lines'])}")
 
     def _recognize(self, period):
@@ -167,7 +179,7 @@ class RecordsSystem:
 
 
 class World:
-    def __init__(self, start: str, db_path=None, out=print, principals=None):
+    def __init__(self, start: str, db_path=None, out=print, principals=None, stripe=None):
         if db_path and Path(db_path).exists():
             raise FileExistsError(f"{db_path} already exists; the ledger is append-only, pick a new path")
         self.uri = db_path or db.memory_uri(f"quota-world-{uuid4().hex}")
@@ -181,7 +193,7 @@ class World:
         self.queue = ClockRunner(self.ro, self.wp, self.clock, self.emit)
         self.api = PeopleAPI(self)
         self.records = RecordsSystem(self)
-        self.billing = BillingSystem(self)
+        self.billing = BillingSystem(self, stripe)
         self.seats = []          # drained in this order at every instant, after records and billing
         self.people = None
 

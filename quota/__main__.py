@@ -14,18 +14,34 @@ def _open(path):
     return closing(db.connect(path, readonly=True))
 
 
+def _sandbox(args, tag):
+    if not getattr(args, "stripe", False):
+        return None
+    from uuid import uuid4
+    from quota.sim.stripe_billing import StripeSandbox
+    return StripeSandbox.from_env(f"{tag}-{uuid4().hex[:8]}")
+
+
 def cmd_demo(args) -> int:
     from quota.sim import demo_acme
+    from quota.sim.stripe_billing import StripeSandboxError
+    try:
+        stripe = _sandbox(args, "quota-acme")
+    except StripeSandboxError as exc:
+        print(f"--stripe: {exc}")
+        return 2
     if args.live:
         from quota.agent.llm import LLM, LLMUnavailable
         try:
-            demo = demo_acme.run(db_path=args.db, mode="live", llm=LLM())
+            demo = demo_acme.run(db_path=args.db, mode="live", llm=LLM(), stripe=stripe)
         except LLMUnavailable as exc:
             print(f"\n--live stopped: {exc}. Set ANTHROPIC_API_KEY (or log in with `ant auth login`) and rerun; "
                   f"answers already received are cached.")
             return 2
     else:
-        demo = demo_acme.run(db_path=args.db)
+        demo = demo_acme.run(db_path=args.db, stripe=stripe)
+    if stripe:
+        print(f"\nStripe sandbox run {stripe.run_tag}: {stripe.created}")
     if args.db:
         print(f"\nLedger written to {args.db}")
     demo.close()
@@ -67,8 +83,13 @@ def cmd_tb(args) -> int:
 
 def cmd_eval(args) -> int:
     from quota import eval as evaluation
+    from quota.sim.stripe_billing import StripeSandboxError
     out_dir = Path(args.out) / f"seed-{args.seed}"
-    card = evaluation.run_eval(args.seed, reps=args.reps, out_dir=out_dir)
+    try:
+        card = evaluation.run_eval(args.seed, reps=args.reps, out_dir=out_dir, stripe=args.stripe)
+    except StripeSandboxError as exc:
+        print(f"--stripe: {exc}")
+        return 2
     for line in evaluation.format_scorecard(card):
         print(line)
     print(f"\nAnswer key and scorecard written to {out_dir}")
@@ -87,6 +108,8 @@ def main(argv=None) -> int:
                       help="people and extractions come from the demo script; no model calls (default)")
     mode.add_argument("--live", action="store_true",
                       help="people are played by the model (QUOTA_MODEL, default claude-opus-5-5)")
+    demo.add_argument("--stripe", action="store_true",
+                      help="invoices, payments and refunds become real objects in a Stripe sandbox (STRIPE_API_KEY)")
     demo.set_defaults(fn=cmd_demo)
 
     verify = sub.add_parser("verify", help="chain verify + all invariants")
@@ -107,8 +130,12 @@ def main(argv=None) -> int:
     evaluate.add_argument("--seed", type=int, required=True)
     evaluate.add_argument("--reps", type=int, default=20)
     evaluate.add_argument("--out", default="runs", help="directory for answer_key.json and scorecard.json")
+    evaluate.add_argument("--stripe", action="store_true",
+                          help="run billing in a Stripe sandbox with test clocks (STRIPE_API_KEY; takes minutes)")
     evaluate.set_defaults(fn=cmd_eval)
 
+    from quota.env import load_env
+    load_env()
     args = parser.parse_args(argv)
     return args.fn(args)
 

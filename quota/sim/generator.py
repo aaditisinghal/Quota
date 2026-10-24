@@ -549,10 +549,10 @@ class Fernhill:
             "approvals_json": ["priya.nair"], "effective_from": f"{self.start[:4]}-01-01",
             "expires_at": f"{self.start[:4]}-12-31"}, SEED)
 
-    def build(self, db_path=None, out=None) -> World:
+    def build(self, db_path=None, out=None, stripe=None) -> World:
         config.register_principals(self.principals())
         world = World(SEED_START, db_path, out or (lambda line: None),
-                      principals={**config.principals(with_seed=True), **self.principals()})
+                      principals={**config.principals(with_seed=True), **self.principals()}, stripe=stripe)
         analyst = CommissionsAnalyst(world, ScriptedExtractor(self.extractions))
         world.seats = [DeferredAccountant(world), analyst]
         world.people = PolicyPeople(world, sorted(self.actions + self.people_actions(), key=lambda a: a["at"]),
@@ -568,14 +568,14 @@ class Fernhill:
 
 
 def generate(seed: int, reps: int = 20, start: str = "2026-01-01", end: str = "2026-06-30", out_dir=None,
-             db_path=None, out=None, plant: bool = True) -> World:
+             db_path=None, out=None, plant: bool = True, stripe=None) -> World:
     """A seeded Fernhill World with its facts and events loaded, ready for `world.run_until(world.end_ts)`.
     With `plant`, errors E01-E16 are planted (40 cases) and the answer key is written to out_dir/answer_key.json
-    when out_dir is given."""
+    when out_dir is given. `stripe` (a StripeSandbox) makes billing real in a Stripe sandbox."""
     fernhill = Fernhill(seed, reps, start, end)
     if plant:
         fernhill.plant_all()
-    world = fernhill.build(db_path, out)
+    world = fernhill.build(db_path, out, stripe)
     if out_dir is not None:
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         (Path(out_dir) / "answer_key.json").write_text(json.dumps(fernhill.answer_key, indent=2), encoding="utf-8")

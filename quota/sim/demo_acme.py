@@ -32,9 +32,9 @@ def load_script(path=SCRIPT_PATH) -> dict:
 
 
 class AcmeDemo:
-    def __init__(self, db_path=None, out=print, mode="scripted", llm=None, script_path=SCRIPT_PATH):
+    def __init__(self, db_path=None, out=print, mode="scripted", llm=None, script_path=SCRIPT_PATH, stripe=None):
         script = load_script(script_path)
-        self.world = World(seed_acme.SEED_START, db_path, out)
+        self.world = World(seed_acme.SEED_START, db_path, out, stripe=stripe)
         live = mode == "live"
         extractor = ModelExtractor(llm) if live else ScriptedExtractor(script["extractions"])
         analyst = CommissionsAnalyst(self.world, extractor, llm if live else None)
@@ -167,5 +167,5 @@ class AcmeDemo:
                 and all(self.results["replays"].values()))
 
 
-def run(db_path=None, out=print, mode="scripted", llm=None) -> AcmeDemo:
-    return AcmeDemo(db_path, out, mode, llm).run()
+def run(db_path=None, out=print, mode="scripted", llm=None, stripe=None) -> AcmeDemo:
+    return AcmeDemo(db_path, out, mode, llm, stripe=stripe).run()

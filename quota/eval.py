@@ -180,11 +180,22 @@ def run_pushback(path=FIXTURE) -> dict:
 
 # ---------- the scorecard ----------
 
-def run_eval(seed: int, reps: int = 20, out_dir=None, pushback: bool = True) -> dict:
+def run_eval(seed: int, reps: int = 20, out_dir=None, pushback: bool = True, stripe: bool = False) -> dict:
     out = Path(out_dir) if out_dir else None
-    world = generate(seed, reps=reps, out_dir=out)
+    sandbox = None
+    if stripe:
+        from uuid import uuid4
+        from quota.sim.stripe_billing import StripeSandbox
+        sandbox = StripeSandbox.from_env(f"quota-seed{seed}-{uuid4().hex[:8]}")
+    world = generate(seed, reps=reps, out_dir=out, stripe=sandbox)
     world.run_until(world.end_ts)
     card = {"seed": seed, "reps": reps, **score(world)}
+    if sandbox:
+        mirrored = queries.fetch_all(world.ro, "SELECT external_ref FROM billing")
+        card["stripe"] = {"run": sandbox.run_tag, **sandbox.created,
+                          "mirrored": len(mirrored),
+                          "mirrored_with_stripe_ids": sum(r["external_ref"].startswith(("in_1", "pi_", "re_"))
+                                                          for r in mirrored)}
     world.close()
     card["pushback"] = run_pushback() if pushback else None
     if out:
@@ -207,4 +218,9 @@ def format_scorecard(card: dict) -> list[str]:
     lines.append("misses: " + (", ".join(misses) if misses else "none"))
     codes = ", ".join(f"{code} x{n}" for code, n in sorted(card["refusal_codes"].items()))
     lines.append(f"write-path refusals: {card['refusals']}" + (f" ({codes})" if codes else ""))
+    if card.get("stripe"):
+        s = card["stripe"]
+        lines.append(f"stripe sandbox ({s['run']}): {s['clocks']} test clocks, {s['customers']} customers, "
+                     f"{s['invoices']} invoices, {s['payments']} payments, {s['refunds']} refunds; "
+                     f"{s['mirrored_with_stripe_ids']}/{s['mirrored']} billing rows carry Stripe ids")
     return lines
