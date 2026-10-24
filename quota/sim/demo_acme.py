@@ -15,7 +15,7 @@ from quota import config
 from quota.agent.commissions_analyst import CommissionsAnalyst
 from quota.agent.deferred_accountant import DeferredAccountant
 from quota.agent.extract import ModelExtractor, ScriptedExtractor
-from quota.agent.personas import ScriptedPeople
+from quota.agent.personas import LivePeople, ScriptedPeople
 from quota.engine.plans import normalize
 from quota.ledger import hashing, invariants, queries
 from quota.money import fmt_pct, fmt_usd
@@ -25,7 +25,6 @@ from quota.sim.world import World
 SCRIPT_PATH = Path(__file__).with_name("acme_script.yaml")
 REPORT_AT = "2026-06-30T23:45:00Z"
 DEAL, REP = "acme", "jordan.kim"
-REPLAY_IDS = ("D-0001", "D-0005", "D-0007")
 
 
 def load_script(path=SCRIPT_PATH) -> dict:
@@ -38,8 +37,11 @@ class AcmeDemo:
         self.world = World(seed_acme.SEED_START, db_path, out)
         live = mode == "live"
         extractor = ModelExtractor(llm) if live else ScriptedExtractor(script["extractions"])
-        self.world.seats = [DeferredAccountant(self.world), CommissionsAnalyst(self.world, extractor, llm if live else None)]
-        self.world.people = ScriptedPeople(self.world, script["people"])
+        analyst = CommissionsAnalyst(self.world, extractor, llm if live else None)
+        self.world.seats = [DeferredAccountant(self.world), analyst]
+        self.world.people = LivePeople(self.world, script["people"], llm) if live else \
+            ScriptedPeople(self.world, script["people"])
+        self.world.queue.add_timer_source(analyst.timers)
         for event in script["events"]:
             self.world.queue.schedule(event["at"], event["type"], event["payload"])
         self.results: dict = {}
@@ -96,11 +98,18 @@ class AcmeDemo:
         say()
         checks = invariants.check_all(self.ro)
         chain_ok, bad_seq = hashing.verify_chain(self.ro)
-        replays = {d: queries.replay_decision(self.ro, d)[0] for d in REPLAY_IDS}
+        replays = {d: queries.replay_decision(self.ro, d)[0] for d in self.replay_ids()}
         self.results = {"invariants": checks, "chain": (chain_ok, bad_seq), "replays": replays}
         say(invariants.summary_line(checks))
         say(f"CHAIN       {'OK' if chain_ok else f'FAIL at seq {bad_seq}'} ({hashing.chain_length(self.ro)} rows)")
         say("REPLAY      " + "  ".join(f"{d} {'MATCH' if ok else 'MISMATCH'}" for d, ok in replays.items()))
+
+    def replay_ids(self) -> list[str]:
+        """The first commission calc, the latest one, and the clawback (D-0001, D-0005, D-0007 when scripted)."""
+        decisions = queries.fetch_all(self.ro, "SELECT id, kind FROM decisions ORDER BY id")
+        calcs = [d["id"] for d in decisions if d["kind"] == "commission_calc"]
+        clawbacks = [d["id"] for d in decisions if d["kind"] == "clawback"]
+        return list(dict.fromkeys(calcs[:1] + calcs[-1:] + clawbacks[:1]))
 
     def _account_total(self, account, subledger_ref, exclude=()):
         return sum(l["debit_cents"] - l["credit_cents"] for e in queries.journal(self.ro)
@@ -109,12 +118,14 @@ class AcmeDemo:
 
     def cascade(self) -> list[str]:
         journal = [e for e in queries.journal(self.ro) if e["status"] == "posted"]
-        refund = next(e for e in journal if queries.memo_kind(e["memo"]) == "refund"
-                      and e["lines"][0]["subledger_ref"] == DEAL)
-        clawback_line = next(l for l in queries.fetch_all(self.ro, "SELECT * FROM commission_lines ORDER BY id")
-                             if l["deal_id"] == DEAL and l["amount_cents"] < 0)
-        clawback = next(e for e in journal if queries.memo_kind(e["memo"]) == "clawback"
-                        and e["decision_id"] == clawback_line["decision_id"])
+        refund = next((e for e in journal if queries.memo_kind(e["memo"]) == "refund"
+                       and e["lines"][0]["subledger_ref"] == DEAL), None)
+        clawback_line = next((l for l in queries.fetch_all(self.ro, "SELECT * FROM commission_lines ORDER BY id")
+                              if l["deal_id"] == DEAL and l["amount_cents"] < 0), None)
+        clawback = clawback_line and next((e for e in journal if queries.memo_kind(e["memo"]) == "clawback"
+                                           and e["decision_id"] == clawback_line["decision_id"]), None)
+        if refund is None or clawback is None:   # possible in --live, where people may decide otherwise
+            return ["Acme churn: what changed", "  (no posted refund and clawback for acme; nothing to cascade)"]
         clawback_lines = {l["account"]: l for l in clawback["lines"]}
         churn = json.loads(queries.fetch_one(self.ro, "SELECT payload_json FROM events WHERE type = 'customer.churned'")
                            ["payload_json"])

@@ -21,7 +21,8 @@ ANALYST = "seat:commissions_analyst"
 CHANNEL = "slack:dm"
 CLAIM_ROUTES = {"dispute": "dispute", "escalate": "dispute", "exception_grant": "exception",
                 "spiff_claim": "authority", "approval": "chat_approval", "rejection": "chat_approval"}
-JOB_ROUTES = {"commission_run": "commission_run", "payroll_file": "payroll_file", "churn_review": "clawback_lines"}
+JOB_ROUTES = {"commission_run": "commission_run", "payroll_file": "payroll_file", "churn_review": "clawback_lines",
+              "approver_digest": "digest", "approval_followup": "followup"}
 DISPUTE_OUTCOMES = {"held": "held", "conceded": "conceded", "escalation_offered": "escalated"}
 
 
@@ -98,6 +99,35 @@ class CommissionsAnalyst(Seat):
     def deal_names(self) -> dict[str, str]:
         return {d: self.get("deals", d)["account"] for d in queries.ids(self.ro, "deals", self.now)}
 
+    def pending_approvals(self, now=None) -> list[dict]:
+        """Approvals nobody has decided yet. Silence never approves; it only earns reminders."""
+        now = now or self.now
+        return [a for a in queries.fetch_all(self.ro, "SELECT * FROM approvals WHERE known_at <= ? ORDER BY id", (now,))
+                if queries.approval_decision(self.ro, a["id"], now) is None]
+
+    def granted_by_precedent(self, deal_id, field, value) -> str | None:
+        for p in queries.precedents_in_force(self.ro, self.now):
+            if (queries.loads(p["scope_json"]) == {"deal_id": deal_id, "field": field}
+                    and queries.loads(p["override_json"]).get("value") == value):
+                return p["id"]
+        return None
+
+    # ---------- timers: the approver calendar ----------
+
+    def timers(self, now) -> list[tuple[str, str, dict]]:
+        """While anything is pending: the next two 09:00Z digests, and a follow-up for each approval
+        ESCALATE_AFTER_BUSINESS_DAYS after it was requested."""
+        pending = self.pending_approvals(now)
+        if not pending:
+            return []
+        first = f"{now[:10]}T{config.DIGEST_TIME}"
+        if first < now:
+            first = clk.add_days(first, 1)
+        out = [(t, "job.due", {"job": "approver_digest", "date": t[:10]}) for t in (first, clk.add_days(first, 1))]
+        out += [(clk.add_business_days(a["known_at"], config.ESCALATE_AFTER_BUSINESS_DAYS), "job.due",
+                 {"job": "approval_followup", "approval_id": a["id"]}) for a in pending]
+        return out
+
     # ---------- job.due commission_run ----------
 
     def gather_commission_run(self, ctx):
@@ -165,8 +195,18 @@ class CommissionsAnalyst(Seat):
             ctx.route = "clarify"
             return None
         ctx.data["line"] = line
+        prior = self._latest_decision_for_line(line)
+        if claim.kind == "escalate":
+            if self.decisions(kind="escalation", subject_id=line["id"]):
+                ctx.route = "already_escalated"      # never ask the same question twice for the same scope
+                return None
+            disputed = self.decisions(kind="dispute", subject_id=line["id"])
+            if not disputed:
+                ctx.route = "clarify"
+                return None
+            prior = disputed[-1]                     # escalate the claim that was held
         ctx.rows = {**queries.commission_rows(self.ro, line["rep_id"], self.now), "commission_lines": [line],
-                    "messages": [message], "decisions": [self._latest_decision_for_line(line)]}
+                    "messages": [message], "decisions": [prior]}
         engine_claim = {"kind": claim.kind, "line": line["id"], "quote": claim.quote}
         if claim.kind == "dispute":
             engine_claim.update(deal=line["deal_id"], field=claim.field, asserted=asserted, evidence_refs=[])
@@ -214,6 +254,14 @@ class CommissionsAnalyst(Seat):
                 return [decision_id, self.record_calc(rows, line["deal_id"], line["rep_id"], calc, line["id"])[0]]
         return [decision_id]
 
+    def write_already_escalated(self, ctx):
+        line, message = ctx.data["line"], ctx.data["message"]
+        escalation = self.decisions(kind="escalation", subject_id=line["id"])[-1]
+        owner = routing.owner("plan_exception")
+        self.send(message["author"], f"{line['id']} is already with {config.display_name(owner)} "
+                                     f"({config.title(owner)}) since {escalation['id']}.", "REPLY")
+        return []
+
     # exception_grant
 
     def reconcile_exception(self, ctx):
@@ -225,6 +273,10 @@ class CommissionsAnalyst(Seat):
         value = claim.amount_cents if claim.field == "base" else claim.asserted_value
         if deal is None or claim.field not in ("booking_date", "base") or value is None:
             ctx.route = "clarify"
+            return None
+        ctx.data["granted_by"] = self.granted_by_precedent(deal["id"], claim.field, value)
+        if ctx.data["granted_by"]:
+            ctx.route = "already_granted"
             return None
         ctx.rows = queries.commission_rows(self.ro, deal["owner_id"], self.now)
         return {"deal_id": deal["id"], "rep_id": deal["owner_id"], "field": claim.field, "value": value}
@@ -255,6 +307,10 @@ class CommissionsAnalyst(Seat):
                               f"({c['granted'].quarter}) -> {approver}: delta {fmt_usd(c['delta'])} "
                               f"({fmt_usd(c['current'].amount_cents)} -> {fmt_usd(c['granted'].amount_cents)}), "
                               f"from {message['id']}")
+        return []
+
+    def write_already_granted(self, ctx):
+        self.send(ctx.data["message"]["author"], f"That is already granted under {ctx.data['granted_by']}.", "REPLY")
         return []
 
     # a claim from someone without the authority for it (E05)
@@ -329,7 +385,15 @@ class CommissionsAnalyst(Seat):
         claim, result = ctx.facts, ctx.data["result"]
         if result == "rejected":
             return "rejected"
-        if result != "final" or not queries.chain_satisfied(self.ro, ctx.data["root"]["id"], self.now):
+        root = ctx.data["root"]
+        if (result != "final" or not queries.chain_satisfied(self.ro, root["id"], self.now)
+                # a backup approval for the same proposal may have been satisfied first
+                or queries.satisfied_approval(self.ro, root["kind"], root["subject_id"], self.now) != root["id"]):
+            return "waiting"
+        if claim.kind != "exception_grant" or not claim.deal_ref:
+            return "waiting"
+        value = claim.amount_cents if claim.field == "base" else claim.asserted_value
+        if self.granted_by_precedent(claim.deal_ref, claim.field, value):
             return "waiting"
         deal = self.get("deals", claim.deal_ref)
         ctx.rows = queries.commission_rows(self.ro, deal["owner_id"], self.now)
@@ -387,6 +451,44 @@ class CommissionsAnalyst(Seat):
         approver = routing.owner("payroll_file")
         approval_id = self.wp.request_approval(self.principal, "payroll_file", file_id, total, approver=approver)
         self.emit("APPROVAL", f"{approval_id} payroll_file {file_id} {fmt_usd(total)} -> {approver}")
+        pay_date = f"{ctx.event.payload['period']}-{config.PAYROLL_DAY:02d}"
+        if clk.add_days(self.now, config.PAYROLL_BLOCKING_DAYS)[:10] >= pay_date:   # blocks a payroll: don't wait
+            self.send(approver, f"{approval_id} blocks payroll {file_id} ({fmt_usd(total)}), which releases on "
+                                f"{pay_date}. Please decide it before then.")
+        return []
+
+    # ---------- job.due approver_digest / approval_followup ----------
+
+    def write_digest(self, ctx):
+        by_approver: dict[str, list[dict]] = {}
+        for approval in self.pending_approvals():
+            by_approver.setdefault(approval["approver"], []).append(approval)
+        for approver, waiting in sorted(by_approver.items()):
+            items = "; ".join(f"{a['id']} {a['kind']} {a['subject_id']} {fmt_usd(a['amount_cents'])} "
+                              f"(waiting since {a['known_at']})" for a in waiting)
+            self.send(approver, f"Daily digest: {len(waiting)} approval(s) waiting on you: {items}.")
+        return []
+
+    def write_followup(self, ctx):
+        approval = self.get("approvals", ctx.event.payload["approval_id"])
+        if queries.approval_decision(self.ro, approval["id"], self.now) is not None:
+            return []
+        waited = f"{approval['id']} ({approval['kind']} {approval['subject_id']}) has waited " \
+                 f"{config.ESCALATE_AFTER_BUSINESS_DAYS} business days"
+        backup = routing.ESCALATION.get(approval["approver"])
+        already = [a for a in self.pending_approvals() if a["kind"] == approval["kind"]
+                   and a["subject_id"] == approval["subject_id"] and a["approver"] == backup]
+        if backup is None or already:
+            self.send(approval["approver"], f"Reminder: {waited} for your decision. Nothing happens until you decide.")
+            return []
+        routed = self.wp.request_approval(self.principal, approval["kind"], approval["subject_id"],
+                                          approval["amount_cents"], approver=backup)
+        self.emit("APPROVAL", f"{routed} {approval['kind']} {approval['subject_id']} {fmt_usd(approval['amount_cents'])} "
+                              f"-> {backup}: no answer from {approval['approver']} on {approval['id']}")
+        self.send(backup, f"{waited} with no answer from {config.display_name(approval['approver'])}; it is now "
+                          f"with you as {routed}.")
+        self.send(approval["approver"], f"{waited}; it is now also with {config.display_name(backup)} as {routed}. "
+                                        f"Silence is not approval.")
         return []
 
     # ---------- job.due churn_review: the rep's side of a recoverable clawback ----------

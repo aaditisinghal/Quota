@@ -87,6 +87,16 @@ def test_request_shape_sent_to_the_messages_api(tmp_path):
     assert "thinking" not in body and "temperature" not in body
 
 
+def test_missing_credentials_stop_the_run(tmp_path):
+    client = anthropic.Anthropic(api_key="test-key")
+    client.beta.messages.create = lambda **kw: (_ for _ in ()).throw(
+        TypeError('"Could not resolve authentication method. Expected one of api_key, auth_token"'))
+    model = LLM(cache_dir=tmp_path, transport=anthropic_transport(client))
+    with pytest.raises(llm_mod.LLMUnavailable, match="no Anthropic credentials"):
+        model.complete_json("s", "p", SCHEMA)
+    assert not issubclass(llm_mod.LLMUnavailable, LLMError)   # extraction guards never swallow it
+
+
 def test_refusals_and_truncation_raise(tmp_path):
     for stop_reason in ("refusal", "max_tokens"):
         model = LLM(cache_dir=tmp_path / stop_reason,

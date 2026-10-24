@@ -50,6 +50,12 @@ MATERIALITY_CENTS = 50000          # $500
 MATERIALITY_BPS_OF_PAYOUT = 200    # 2%
 COMPANY_TZ = "UTC"                 # keep UTC everywhere for the hackathon
 
+# Approver behavior (Phase 2)
+DIGEST_TIME = "09:00:00Z"          # one daily digest per approver
+ESCALATE_AFTER_BUSINESS_DAYS = 2   # then routing.ESCALATION backup; never auto-approve
+PAYROLL_DAY = 15                   # payroll for period YYYY-MM releases on YYYY-MM-15
+PAYROLL_BLOCKING_DAYS = 2          # approvals blocking a payroll this close go out immediately
+
 
 def principals(with_seed: bool = False) -> dict:
     return {**PRINCIPALS, **SEED_PRINCIPAL} if with_seed else dict(PRINCIPALS)

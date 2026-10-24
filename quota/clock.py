@@ -4,7 +4,7 @@ Timestamps are ISO-8601 UTC strings with Z (2026-04-02T17:14:00Z), so string ord
 """
 
 import calendar
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -51,6 +51,24 @@ def add_months(date: str, months: int) -> str:
     year, month = int(period[:4]), int(period[5:7])
     day = min(int(date[8:10]), calendar.monthrange(year, month)[1])
     return f"{period}-{day:02d}"
+
+
+def add_days(ts: str, days: int) -> str:
+    return fmt_ts(parse_ts(ts) + timedelta(days=days))
+
+
+def add_minutes(ts: str, minutes: int) -> str:
+    return fmt_ts(parse_ts(ts) + timedelta(minutes=minutes))
+
+
+def add_business_days(ts: str, days: int) -> str:
+    """Same time of day, `days` weekdays later (Saturday and Sunday are skipped)."""
+    moment = parse_ts(ts)
+    while days > 0:
+        moment += timedelta(days=1)
+        if moment.weekday() < 5:
+            days -= 1
+    return fmt_ts(moment)
 
 
 class SimClock:

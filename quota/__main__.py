@@ -15,7 +15,16 @@ def _open(path):
 
 def cmd_demo(args) -> int:
     from quota.sim import demo_acme
-    demo = demo_acme.run(db_path=args.db)
+    if args.live:
+        from quota.agent.llm import LLM, LLMUnavailable
+        try:
+            demo = demo_acme.run(db_path=args.db, mode="live", llm=LLM())
+        except LLMUnavailable as exc:
+            print(f"\n--live stopped: {exc}. Set ANTHROPIC_API_KEY (or log in with `ant auth login`) and rerun; "
+                  f"answers already received are cached.")
+            return 2
+    else:
+        demo = demo_acme.run(db_path=args.db)
     if args.db:
         print(f"\nLedger written to {args.db}")
     demo.close()
@@ -62,8 +71,11 @@ def main(argv=None) -> int:
     demo = sub.add_parser("demo", help="run a scripted demo world")
     demo.add_argument("world", choices=["acme"])
     demo.add_argument("--db", help="write the ledger to this file (default: in-memory)")
-    demo.add_argument("--scripted", action="store_true", default=True,
+    mode = demo.add_mutually_exclusive_group()
+    mode.add_argument("--scripted", action="store_true", default=True,
                       help="people and extractions come from the demo script; no model calls (default)")
+    mode.add_argument("--live", action="store_true",
+                      help="people are played by the model (QUOTA_MODEL, default claude-opus-5-5)")
     demo.set_defaults(fn=cmd_demo)
 
     verify = sub.add_parser("verify", help="chain verify + all invariants")

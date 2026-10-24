@@ -33,7 +33,11 @@ REPLY_SCHEMA = {"type": "object", "properties": {"reply": {"type": "string"}}, "
 
 
 class LLMError(RuntimeError):
-    pass
+    """The model answered, but not with something usable (refusal, truncation, off-schema)."""
+
+
+class LLMUnavailable(RuntimeError):
+    """No credentials or no connection. Never swallowed: a run that needs the model stops instead of guessing."""
 
 
 # ---------- schema check (the subset of JSON Schema structured outputs use here) ----------
@@ -75,18 +79,27 @@ def anthropic_transport(client=None):
     """Calls Claude with a JSON-schema output format; returns the JSON text."""
     def call(model, system, prompt, schema, effort):
         nonlocal client
+        import anthropic
         if client is None:
-            import anthropic
             client = anthropic.Anthropic()
-        response = client.beta.messages.create(
-            model=model,
-            max_tokens=MAX_TOKENS,
-            betas=[FALLBACK_BETA],
-            fallbacks="default",
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-            output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
-        )
+        try:
+            response = client.beta.messages.create(
+                model=model,
+                max_tokens=MAX_TOKENS,
+                betas=[FALLBACK_BETA],
+                fallbacks="default",
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+                output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
+            )
+        except TypeError as exc:   # the SDK raises this when no credential source resolves
+            if "authentication" not in str(exc):
+                raise
+            raise LLMUnavailable(f"no Anthropic credentials ({exc})") from exc
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+            raise LLMUnavailable(f"credentials rejected ({exc.status_code})") from exc
+        except anthropic.APIConnectionError as exc:
+            raise LLMUnavailable(f"cannot reach the Anthropic API ({exc})") from exc
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
             raise LLMError(f"model declined ({getattr(details, 'category', None) or 'no category'})")

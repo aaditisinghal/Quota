@@ -318,7 +318,13 @@ class WritePath:
         caps = ("draft:approval_request", "draft:journal_entry") if kind == "journal_entry" \
             else ("draft:approval_request",)
         codes = self._codes(actor, *caps)
-        self._check(actor, "request_approval", subject_id, codes, f"{kind} approval for {subject_id}")
+        rejected = queries.fetch_one(self.conn, """
+            SELECT a.id FROM approvals a JOIN approval_decisions d ON d.approval_id = a.id
+            WHERE a.kind = ? AND a.subject_id = ? AND d.decision = 'rejected'""", (kind, subject_id))
+        if rejected:   # the same proposal again: a resubmission needs a new input (a new subject)
+            codes.append("RESUBMIT_NO_NEW_EVIDENCE")
+        self._check(actor, "request_approval", subject_id, codes,
+                    f"{kind} approval for {subject_id}" + (f"; {rejected['id']} was rejected" if rejected else ""))
         with self.conn:
             return self._insert_approval(kind, subject_id, amount_cents, actor, approver, parent_id)
 
