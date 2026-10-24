@@ -306,8 +306,10 @@ class Fernhill:
         end = "2026-06-24"
         self.deals = [d for d in self.deals if not (d.owner == rep.id and d.booked_at[:10] > "2026-06-10")]
         mine = [d for d in self.deals if d.owner == rep.id]
-        for deal in mine:
-            if deal.booked_at[:10] <= "2026-06-10":
+        # Every line the rep earns before leaving is collected before the end date, including splits on other
+        # reps' deals (the first held-out run found a partner split the plant had missed).
+        for deal in self.deals:
+            if rep.id in self.deal_reps(deal) and deal.booked_at[:10] <= "2026-06-10":
                 deal.paid_at = _ts(date.fromisoformat(deal.invoice_at[:10]) + timedelta(days=10), 60)
         case_deal = max((d for d in mine if d.booked_at[:10] <= "2026-05-25" and len(d.splits) == 1),
                         key=lambda d: d.booked_at)

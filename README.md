@@ -1,7 +1,107 @@
 # Quota
 
-Placeholder. Filled in Phase 3.
+An agent-run commissions desk for a simulated SaaS company. Two seats (a commissions analyst and a
+deferred-commission accountant) pick events off their own queues, read sources through a read-only connection,
+let models read words while code decides dollars, and write through a single write path into an append-only,
+hash-chained ledger that refuses anything breaking an invariant.
 
+## Real vs simulated
+
+| Part | Status | How we know it works |
+| --- | --- | --- |
+| Ledger, invariants, hash chain | Real, built here | Invariants checked on every write; `python -m quota verify` recomputes the chain from genesis and re-hashes every row |
+| Commission calculator, amortization, entries | Real, deterministic | Unit tests against hand-calculated cases ($12,000 vs $18,000 on Acme, 36 x $500 amortization, the $18,000 / $16,500 / $1,500 clawback) |
+| Decisions | Real, replayable | Every decision records its inputs (table, id, version, sha256); `python -m quota replay D-0005` recomputes it from that as-of view |
+| Billing (invoices, payments, refunds) | Simulated | Stripe test mode was not built; billing events carry Stripe-style ids and are mirrored idempotently on that id (a duplicate webhook counts once) |
+| CRM, contracts, plans, HR, e-signature | Simulated, seeded | `quota/sim/generator.py` (Fernhill) and the seed; facts arrive as events when the clock reaches them |
+| People (VP, Controller, payroll, reps) | Scripted in the Acme demo, rule-played in the eval, model-played with `--live` | `quota/agent/personas.py`; people act only through the same approval and chat API, with the same write-path capabilities |
+| Models | Claude Opus 5.5 (`claude-opus-5-5`) for extraction, reply wording and `--live` people only | Every extracted number must appear verbatim in its source; replies are checked so every $ amount and date exists in the facts. The eval below uses no model |
+| Planted errors | Simulated, with an answer key | `python -m quota eval --seed N` compares decisions to `answer_key.json` |
+
+## Scorecard (measured)
+
+`python -m quota eval --seed 7` and `--seed 1729`; 20 reps, January to June 2026, ~245 deals, ~1,500 events,
+40 planted cases of 16 error types. A case counts only when both the outcome and the dollar amount match the key.
+
+| Metric | Seed 7 (development) | Seed 1729 (held-out, first run) | Seed 1729 after the key fix |
+| --- | --- | --- | --- |
+| Planted-error recall | 40 / 40 (100%) | 39 / 40 (97.5%) | 40 / 40 (100%) |
+| False flags | 0 | 0 | 0 |
+| Wrong automatic payouts | 0 | 0 | 0 |
+| Pushback test (20 scripted disputes) | held 10/10 invalid, conceded 10/10 valid | same | same |
+| Straight-through rate | 94.7% | 94.9% | 94.9% |
+| Escalations per 100 events | 0.7 | 0.7 | 0.7 |
+| Replay match | 100% (554 decisions) | 100% (580 decisions) | 100% |
+| Write-path refusals | 2, both INV6_PAYROLL_MISMATCH (the two planted payroll-export edits) | 2, same | 2, same |
+
+**Misses.** Held-out seed 1729, first run: **E09-0001** (expected `posted`, got `held`; amount right). The miss was
+in the answer key, not in Quota. The E09 plant made the departing rep's own deals collected before the
+termination date but missed a 30% split the rep held on another rep's deal, which was never collected. Quota held
+that line, as the signed plan says (only lines booked and collected before the end date are paid), so the rep's
+termination review came back `held`. The plant was fixed to cover split partners, and the rerun is in the last
+column.
+
+**What this scorecard does and does not show.**
+- The 16 error types and Quota's handling of them were built in the same phase; the held-out seed tests a new
+  arrangement of the same kinds of error, not unseen kinds.
+- Expected amounts are priced by the same calculator Quota uses, on the generator's ground-truth facts. The
+  amount check therefore tests policy (what gets booked, held, corrected or recovered), not arithmetic; the
+  arithmetic is covered by the hand-calculated unit tests.
+- In the eval, extraction is scripted (exact message to claim) and approvers are rule-played (approve 30 minutes
+  after a request arrives). Model extraction and model-played people are exercised by `--live` on the Acme demo,
+  which completed once against Claude Opus 5.5 (it exposed four bugs, all fixed, with regression tests).
+- The classifier's definition of `corrected` was refined once after the first seed-7 run (it had counted a
+  same-day contract-date ordering effect as a correction). Nothing else was changed after looking at scores.
+- Seed 1729 was chosen by the builder, not hidden by a teammate.
+- Straight-through counts lines approved or paid with no hold, escalation or dispute; the Controller's routine
+  approval of accrual and payroll batches is not counted as a human touch.
+- Not built yet: Stripe test mode, the SEC 10-K policy citations, the "attack your own controls" exercise, and
+  the Phase 4 screens.
+
+## Planted errors and what Quota does
+
+| ID | Planted error | Quota's behavior | Key outcome |
+| --- | --- | --- | --- |
+| E01 | CRM amount above the contract ACV | Pays on contract ACV (R-AMOUNT-01), disagreement recorded with its dollar effect | corrected |
+| E02 | Splits add to 110% | No line for anyone; asks the VP for the split | held |
+| E03 | CRM close Mar 31, countersigned Apr 2; rep disputes | Books on countersignature; dispute held with claim, evidence, rule, difference, next step | held |
+| E04 | Close date backdated into a locked quarter | Flags BACKDATED to the VP and the Controller; booking stands | escalated |
+| E05 | SPIF promised by a manager in chat | Not paid; routed to the plan owner | escalated |
+| E06 | Multi-year deal on TCV | Pays on year-1 ACV | corrected |
+| E07 | Customer 120 days late | Collection hold; rep told; released on payment | held |
+| E08 | Churn inside the 6-month clawback window | Clawback, asset write-off and receivable, sent to the Controller | escalated |
+| E09 | Rep terminated (California) | Pays what the signed plan pays; policy flag to the Controller | posted |
+| E10 | Territory move half done by the Sales Ops bot | Holds the deals left behind; asks the VP to finish | held |
+| E11 | Same deal credited 100% to two reps | Owner of record keeps the credit | corrected |
+| E12 | Amendment raises ACV mid-term | Incremental commission, booked when the amendment is signed | posted |
+| E13 | Duplicate payment webhook | Counted once | posted |
+| E14 | Unsigned plan draft differs from the signed plan | Pays on the signed plan; flags the drift to the VP | escalated |
+| E15 | Deal voided after payout | Full recovery in the open period, linked to the original line | corrected |
+| E16 | Payroll export differs from approved lines by $340 | Write path refuses the release and names the line | blocked |
+
+## Run it
+
+```bash
+pip install -e .
 ```
+
+```bash
 python -m quota demo acme
 ```
+
+```bash
+python -m quota eval --seed 7
+```
+
+- `python -m quota demo acme`: the Acme story (section 9), driven by events through the seats; prints the
+  timeline, journal, trial balance, the churn cascade, invariants, chain and replays.
+- `python -m quota demo acme --live`: people played by Claude (needs `ANTHROPIC_API_KEY`; answers are cached in
+  `.llm_cache/`, so a rerun is free).
+- `python -m quota eval --seed N [--reps 20]`: the scorecard; writes `runs/seed-N/answer_key.json` and
+  `scorecard.json`.
+- `python -m quota verify|replay|tb --db PATH`: chain and invariants, decision replay, trial balance as of a time
+  (write a ledger with `demo acme --db PATH`).
+- `pytest -q`: the test suite.
+
+`IMPLEMENTATION.md` is the build contract, `SPEC.md` the why, and `ASSUMPTIONS.md` every choice made where they
+were silent.
