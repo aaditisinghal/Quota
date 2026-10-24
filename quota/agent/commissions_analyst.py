@@ -102,9 +102,7 @@ class CommissionsAnalyst(Seat):
 
     def pending_approvals(self, now=None) -> list[dict]:
         """Approvals nobody has decided yet. Silence never approves; it only earns reminders."""
-        now = now or self.now
-        return [a for a in queries.fetch_all(self.ro, "SELECT * FROM approvals WHERE known_at <= ? ORDER BY id", (now,))
-                if queries.approval_decision(self.ro, a["id"], now) is None]
+        return queries.pending_approvals(self.ro, now or self.now)
 
     def granted_by_precedent(self, deal_id, field, value) -> str | None:
         for p in queries.precedents_in_force(self.ro, self.now):
@@ -456,8 +454,16 @@ class CommissionsAnalyst(Seat):
 
     # ---------- job.due payroll_file ----------
 
+    def payroll_held(self) -> set[str]:
+        """Lines a decision has taken out of payroll (subclasses of hold add to this)."""
+        return set()
+
     def reconcile_payroll_file(self, ctx):
-        return [l["id"] for l in self.lines() if self.line_status(l["id"]) == "approved"]
+        """Approved positive lines on collected deals (the plan pays on collection). Recoveries (negative lines)
+        stay in 1290 rather than netting through payroll."""
+        held = self.payroll_held()
+        return [l["id"] for l in self.lines() if l["amount_cents"] > 0 and l["id"] not in held
+                and self.line_status(l["id"]) == "approved" and queries.collected(self.ro, l["deal_id"], self.now)]
 
     def write_payroll_file(self, ctx):
         if not ctx.res:

@@ -166,6 +166,34 @@ class ScriptedPeople:
         return min(times) if times else None
 
 
+class PolicyPeople(ScriptedPeople):
+    """Rule-played people for generated worlds: the script's actions at their times, and approvers who approve
+    what is addressed to them `delay_minutes` after it arrives. The eval measures Quota, not the approvers."""
+
+    def __init__(self, world, actions: list[dict], approves: dict[str, set[str]], delay_minutes=30):
+        super().__init__(world, {"actions": actions})
+        self.approves, self.delay_minutes = approves, delay_minutes
+
+    def _due_approvals(self):
+        return [(clk.add_minutes(a["known_at"], self.delay_minutes), a)
+                for a in queries.pending_approvals(self.world.ro, self.world.clock.now())
+                if a["kind"] in self.approves.get(a["approver"], ())]
+
+    def act(self) -> bool:
+        acted = super().act()
+        now = self.world.clock.now()
+        for at, approval in self._due_approvals():
+            if at <= now:
+                self.api.approve(approval["approver"], approval["id"], "Reviewed; consistent with the plan.")
+                acted = True
+        return acted
+
+    def next_time(self) -> str | None:
+        now = self.world.clock.now()
+        times = [t for t in [super().next_time()] + [at for at, _ in self._due_approvals()] if t and t > now]
+        return min(times) if times else None
+
+
 class LivePeople(ScriptedPeople):
     """--live: the script's own actions still happen, but every response is a model call with a fixed persona
     prompt, answering through PeopleAPI only. A response is due at the script's time for the same item id when

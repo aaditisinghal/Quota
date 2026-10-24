@@ -109,6 +109,20 @@ def approval_decision(conn, approval_id, t=None) -> dict | None:
                            "ORDER BY known_at, rowid LIMIT 1", (approval_id, _t(t)))
 
 
+def pending_approvals(conn, t) -> list[dict]:
+    """Approvals with no decision as of t."""
+    return fetch_all(conn, """
+        SELECT a.* FROM approvals a WHERE a.known_at <= ?
+          AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.approval_id = a.id AND d.known_at <= ?)
+        ORDER BY a.id""", (t, t))
+
+
+def collected(conn, deal_id, t) -> bool:
+    """Has the customer paid anything on this deal (the plan pays on collection)?"""
+    return fetch_one(conn, "SELECT id FROM billing WHERE deal_id = ? AND kind = 'payment' AND known_at <= ? LIMIT 1",
+                     (deal_id, t)) is not None
+
+
 def chain_ids(conn, root_id, t=None) -> list[str]:
     chain, current = [], root_id
     while current is not None:
@@ -168,24 +182,29 @@ def standing_precedent(conn, kind, t) -> str | None:
 
 # ---------- gathering decision inputs ----------
 
+def latest_rows(conn, table, t) -> list[dict]:
+    """The latest version of every id in a versioned table, as known at t."""
+    return fetch_all(conn, f"""
+        SELECT x.* FROM {table} x WHERE x.known_at <= ?
+          AND x.version = (SELECT MAX(y.version) FROM {table} y WHERE y.id = x.id AND y.known_at <= ?)
+        ORDER BY x.id""", (t, t))
+
+
+def credits_rep(deal: dict, rep_id: str) -> bool:
+    return deal["owner_id"] == rep_id or any(s["rep"] == rep_id for s in json.loads(deal["splits_json"]))
+
+
 def commission_rows(conn, rep_id, t) -> dict[str, list[dict]]:
-    """Everything the calculator reads for one rep, as known at t."""
-    deals = [as_of(conn, "deals", deal_id, t) for deal_id in ids(conn, "deals", t)]
-    mine = [d for d in deals if d["owner_id"] == rep_id
-            or any(s["rep"] == rep_id for s in json.loads(d["splits_json"]))]
+    """Everything the calculator reads for one rep, as known at t: the latest deal versions, every contract
+    version (amendments are history), every plan version (drafts included), e-sign events, precedents."""
+    mine = [d for d in latest_rows(conn, "deals", t) if credits_rep(d, rep_id)]
     deal_ids = [d["id"] for d in mine]
-    contracts = []
-    for deal_id in deal_ids:
-        found = fetch_one(conn, "SELECT id FROM contracts WHERE deal_id = ? AND known_at <= ? "
-                                "ORDER BY version DESC LIMIT 1", (deal_id, t))
-        if found:
-            contracts.append(as_of(conn, "contracts", found["id"], t))
     marks = ", ".join("?" * len(deal_ids))
+    contracts = fetch_all(conn, f"SELECT * FROM contracts WHERE deal_id IN ({marks}) AND known_at <= ? "
+                                f"ORDER BY id, version", (*deal_ids, t)) if deal_ids else []
     esign = fetch_all(conn, f"SELECT * FROM esign_events WHERE deal_id IN ({marks}) AND known_at <= ? ORDER BY id",
                       (*deal_ids, t)) if deal_ids else []
-    plans = [as_of(conn, "plans", plan_id, t) for plan_id in
-             [r["id"] for r in fetch_all(conn, "SELECT DISTINCT id FROM plans WHERE rep_id = ? AND known_at <= ?",
-                                         (rep_id, t))]]
+    plans = fetch_all(conn, "SELECT * FROM plans WHERE rep_id = ? AND known_at <= ? ORDER BY id, version", (rep_id, t))
     precedents = [p for p in precedents_in_force(conn, t) if loads(p["scope_json"]).get("deal_id") in deal_ids]
     return {"plans": plans, "deals": mine, "contracts": contracts, "esign_events": esign, "precedents": precedents}
 

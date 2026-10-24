@@ -88,8 +88,83 @@ class BillingSystem:
                                                      f"{entry_text(entry['lines'])}")
 
 
+class RecordsSystem:
+    """system:records, the simulated CRM, e-signature log, HR records and plan store. It turns released events
+    into fact versions, so a deal, contract or termination is known from the moment its event is released."""
+
+    principal = "system:records"
+    handles = frozenset({"deal.created", "deal.updated", "contract.countersigned", "contract.amended",
+                         "rep.terminated", "plan.amended"})
+
+    def __init__(self, world):
+        self.world = world
+
+    def run_once(self):
+        ev = self.world.queue.next_for(self.principal, self.handles)
+        if ev is None:
+            return None
+        getattr(self, "_" + ev.type.replace(".", "_"))(ev.payload)
+        self.world.wp.mark_event(self.principal, ev.id, "handled")
+        return []
+
+    def _latest(self, table, row_id):
+        return queries.as_of(self.world.ro, table, row_id, self.world.clock.now())
+
+    def _append(self, table, row):
+        return self.world.wp.append_fact(table, row, self.principal)
+
+    @staticmethod
+    def _carry(row):
+        return {k: v for k, v in row.items() if k not in ("version", "known_at")}
+
+    def _deal_created(self, p):
+        f = p["fields"]
+        self._append("deals", {"id": p["deal_id"], "account": f["account"], "crm_amount_cents": f["crm_amount_cents"],
+                               "crm_close_date": f.get("crm_close_date"), "stage": f.get("stage", "open"),
+                               "owner_id": f["owner_id"], "splits_json": f["splits"], "source": f"crm:{p['actor']}"})
+
+    def _deal_updated(self, p):
+        row = self._carry(self._latest("deals", p["deal_id"]))
+        for key, value in p["fields"].items():
+            row["splits_json" if key == "splits" else key] = value
+        row["source"] = f"crm:{p['actor']}"
+        self._append("deals", row)
+
+    def _contract_countersigned(self, p):
+        deal_id, at = p["deal_id"], p["timestamp"]
+        self._append("esign_events", {"id": f"ENV-{deal_id}-countersigned", "envelope_id": f"ENV-{deal_id}",
+                                      "deal_id": deal_id, "event": "countersigned", "at": at})
+        self._append("contracts", {"id": deal_id, "deal_id": deal_id, "acv_cents": p["acv_cents"],
+                                   "term_months": p["term_months"], "contract_date": at[:10], "countersigned_at": at,
+                                   "clauses_json": p["clauses"], "doc_ref": f"contracts/{deal_id}-msa.pdf",
+                                   "source": "esign"})
+
+    def _contract_amended(self, p):
+        row = self._carry(self._latest("contracts", p["deal_id"]))
+        terms = dict(p["terms"])
+        kind = terms.pop("kind", "amendment")
+        row.update(terms)
+        clauses = queries.loads(row["clauses_json"])
+        row["clauses_json"] = {**clauses, "amendment": {"kind": kind, "signed_at": p["signed_at"]}}
+        row["doc_ref"] = f"contracts/{p['deal_id']}-amendment-{p['signed_at'][:10]}.pdf"
+        self._append("contracts", row)
+
+    def _rep_terminated(self, p):
+        row = self._carry(self._latest("people", p["rep_id"]))
+        row.update(end_date=p["end_date"], state=p["state"], source="hr")
+        self._append("people", row)
+
+    def _plan_amended(self, p):
+        current = max(queries.fetch_all(self.world.ro, "SELECT * FROM plans WHERE rep_id = ?", (p["rep_id"],)),
+                      key=lambda r: r["version"])
+        config_ = {**queries.loads(current["config_json"]), **p["changes"], "version": p["version"]}
+        self._append("plans", {**self._carry(current), "version": p["version"], "config_json": config_,
+                               "signed_at": p["signed_at"] or None,
+                               "signed_doc_ref": current["signed_doc_ref"] if p["signed_at"] else None})
+
+
 class World:
-    def __init__(self, start: str, db_path=None, out=print):
+    def __init__(self, start: str, db_path=None, out=print, principals=None):
         if db_path and Path(db_path).exists():
             raise FileExistsError(f"{db_path} already exists; the ledger is append-only, pick a new path")
         self.uri = db_path or db.memory_uri(f"quota-world-{uuid4().hex}")
@@ -97,13 +172,14 @@ class World:
         db.init_db(self.conn)
         self.ro = db.connect(self.uri, readonly=True)
         self.clock = clk.SimClock(start)
-        self.wp = WritePath(self.conn, self.clock, config.principals(with_seed=True))
+        self.wp = WritePath(self.conn, self.clock, principals or config.principals(with_seed=True))
         self.out = out
         self.lines: list[str] = []
         self.queue = ClockRunner(self.ro, self.wp, self.clock, self.emit)
         self.api = PeopleAPI(self)
+        self.records = RecordsSystem(self)
         self.billing = BillingSystem(self)
-        self.seats = []          # drained in this order at every instant
+        self.seats = []          # drained in this order at every instant, after records and billing
         self.people = None
 
     def emit(self, actor, kind, text):
@@ -120,7 +196,7 @@ class World:
             progressed = bool(self.queue.release_due())
             if self.people is not None:
                 progressed = self.people.act() or progressed
-            for actor in (self.billing, *self.seats):
+            for actor in (self.records, self.billing, *self.seats):
                 while actor.run_once() is not None:
                     progressed = True
             if not progressed:

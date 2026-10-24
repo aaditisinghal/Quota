@@ -10,6 +10,7 @@ claim is extracted); an event with no route is marked ignored.
 from dataclasses import dataclass, field
 
 from quota.ledger import queries
+from quota.ledger.write_path import Refused
 from quota.sim.events import Event
 
 
@@ -87,7 +88,12 @@ class Seat:
         return ctx.decision
 
     def write(self, decision, ctx: Context) -> list[str]:
-        decision_ids = self._step("write", ctx) or []
+        try:
+            decision_ids = self._step("write", ctx) or []
+        except Refused as refused:      # the write path said no: it is logged; the seat moves on
+            self.emit("REFUSED", f"{refused.refusal_id} {ctx.route} on {ctx.event.id}: "
+                                 f"{', '.join(refused.reason_codes)} ({refused.detail})")
+            decision_ids = []
         self.wp.mark_event(self.principal, ctx.event.id, "handled" if ctx.route else "ignored")
         return decision_ids
 
@@ -98,10 +104,13 @@ class Seat:
     # ---------- shared reads ----------
 
     def lines(self, deal_id=None, rep_id=None) -> list[dict]:
-        found = queries.fetch_all(self.ro, "SELECT * FROM commission_lines WHERE known_at <= ? ORDER BY id",
-                                  (self.now,))
-        return [l for l in found if (deal_id is None or l["deal_id"] == deal_id)
-                and (rep_id is None or l["rep_id"] == rep_id)]
+        where, params = ["known_at <= ?"], [self.now]
+        for column, value in (("deal_id", deal_id), ("rep_id", rep_id)):
+            if value is not None:
+                where.append(f"{column} = ?")
+                params.append(value)
+        return queries.fetch_all(self.ro, f"SELECT * FROM commission_lines WHERE {' AND '.join(where)} ORDER BY id",
+                                 tuple(params))
 
     def line_status(self, line_id) -> str | None:
         return queries.line_status(self.ro, line_id, self.now)
@@ -113,10 +122,13 @@ class Seat:
         return live[-1] if live else None
 
     def decisions(self, kind=None, subject_id=None) -> list[dict]:
-        found = queries.fetch_all(self.ro, "SELECT * FROM decisions WHERE known_at <= ? ORDER BY known_at, id",
-                                  (self.now,))
-        return [d for d in found if (kind is None or d["kind"] == kind)
-                and (subject_id is None or d["subject_id"] == subject_id)]
+        where, params = ["known_at <= ?"], [self.now]
+        for column, value in (("kind", kind), ("subject_id", subject_id)):
+            if value is not None:
+                where.append(f"{column} = ?")
+                params.append(value)
+        return queries.fetch_all(self.ro, f"SELECT * FROM decisions WHERE {' AND '.join(where)} "
+                                          "ORDER BY known_at, id", tuple(params))
 
     def approval_root(self, approval_id) -> dict:
         approval = self.get("approvals", approval_id)

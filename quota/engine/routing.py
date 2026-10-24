@@ -2,7 +2,10 @@
 
 from quota import config
 
-OWNERS = {"plan_exception": "marcus.lee", "journal_entry": "priya.nair", "payroll_file": "priya.nair"}
+OWNERS = {"plan_exception": "marcus.lee", "journal_entry": "priya.nair", "payroll_file": "priya.nair",
+          # Phase 3: who answers questions that are not approvals
+          "territory": "marcus.lee", "splits": "marcus.lee", "plan_config": "marcus.lee",
+          "material_flag": "priya.nair", "payroll_release": "dana.ortiz"}
 ESCALATION = {"marcus.lee": "priya.nair", "priya.nair": None}
 
 

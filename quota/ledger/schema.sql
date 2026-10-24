@@ -129,3 +129,20 @@ CREATE TABLE refusals (
 CREATE TABLE chain (
   seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, ref_id TEXT NOT NULL,
   payload_sha TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL, known_at TEXT NOT NULL);
+
+-- Phase 3: indexes for a six-month, multi-rep world (lookups only; no effect on rows or the chain).
+CREATE INDEX idx_event_status ON event_status(event_id, actor);
+CREATE INDEX idx_events_type ON events(type, release_at);
+CREATE INDEX idx_approvals_subject ON approvals(kind, subject_id);
+CREATE INDEX idx_approvals_parent ON approvals(parent_id);
+CREATE INDEX idx_approval_decisions ON approval_decisions(approval_id);
+CREATE INDEX idx_je_status ON je_status(je_id);
+CREATE INDEX idx_line_status ON commission_line_status(line_id);
+CREATE INDEX idx_lines_deal ON commission_lines(deal_id, rep_id);
+CREATE INDEX idx_decisions_subject ON decisions(subject_id);
+CREATE INDEX idx_decisions_kind ON decisions(kind);
+CREATE INDEX idx_journal_decision ON journal_entries(decision_id);
+CREATE INDEX idx_contracts_deal ON contracts(deal_id);
+CREATE INDEX idx_periods ON periods(period);
+CREATE INDEX idx_billing_deal ON billing(deal_id);
+CREATE INDEX idx_messages_to ON messages(to_principal);

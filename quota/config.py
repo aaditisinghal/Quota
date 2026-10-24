@@ -34,6 +34,11 @@ PRINCIPALS = {
     "system:billing": {"kind": "simulated ERP", "limit": None,
                        "capabilities": frozenset({"post:source_entry", "claim:event"})},
     "system": {"kind": "simulator", "limit": None, "capabilities": frozenset({"emit:event"})},
+    # Phase 3: the simulated CRM / e-signature log / HR records / plan store, and the CRM's automation.
+    "system:records": {"kind": "simulated CRM, e-sign, HR, plans", "limit": None,
+                       "capabilities": frozenset({"write:fact", "claim:event"})},
+    "salesops.bot": {"kind": "bot", "name": "Sales Ops bot", "title": "Automated colleague", "limit": None,
+                     "capabilities": frozenset()},
     "priya.nair": _human("Priya Nair", "Controller",
                          {"approve:plan_exception", "approve:journal_entry", "approve:payroll_file",
                           "lock:period"}, limit=None),
@@ -59,6 +64,15 @@ PAYROLL_BLOCKING_DAYS = 2          # approvals blocking a payroll this close go 
 
 def principals(with_seed: bool = False) -> dict:
     return {**PRINCIPALS, **SEED_PRINCIPAL} if with_seed else dict(PRINCIPALS)
+
+
+def rep_principal(name: str, title: str = "AE") -> dict:
+    return _human(name, title, {"dispute:own_lines"})
+
+
+def register_principals(extra: dict) -> None:
+    """Generated worlds add their reps (names and capabilities) to the directory."""
+    PRINCIPALS.update({k: v for k, v in extra.items() if k not in PRINCIPALS})
 
 
 def has_capability(principal_map: dict, principal: str, capability: str) -> bool:
