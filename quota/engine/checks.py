@@ -34,12 +34,32 @@ def check_backdating(rows, deal_id, period_locked_at) -> dict:
 
 
 def check_collection(rows, deal_id, days) -> dict:
-    """E07: the plan pays on collection and holds commission once a customer is this many days late."""
+    """E07: the plan pays on collection and holds commission once a customer is this many days late. Payment
+    status comes from billing (Stripe), not from the notice: a customer billing shows as paid is not held."""
     deal = latest_by_id(rows["deals"])[deal_id]
     plan = plan_for(rows, deal["owner_id"], deal["crm_close_date"] or "9999-12-31")
     hold_days = int(plan.raw.get("collection_hold_days", 90))
+    payments = sorted((b for b in rows.get("billing", []) if b["deal_id"] == deal_id and b["kind"] == "payment"),
+                      key=lambda b: b["at"])
+    paid = payments[0] if payments else None
     return {"fn": "check_collection", "args": {"deal_id": deal_id, "days": days},
-            "result": {"held": days >= hold_days, "hold_days": hold_days, "pay_on": plan.raw.get("pay_on")}}
+            "result": {"held": days >= hold_days and paid is None, "hold_days": hold_days,
+                       "pay_on": plan.raw.get("pay_on"),
+                       "paid": None if paid is None else {"id": paid["id"], "at": paid["at"],
+                                                          "amount_cents": paid["amount_cents"],
+                                                          "external_ref": paid.get("external_ref")}}}
+
+
+def check_resubmission(rows, deal_id, field, value, rejected_approval_id, rejected_at) -> dict:
+    """SPEC "Handling the answer": a declined proposal is resubmitted only with new evidence, i.e. a deal,
+    contract or e-signature record for the deal that became known after the rejection."""
+    newer = sorted(f"{table}:{r['id']}" + (f":v{r['version']}" if r.get("version") is not None else "")
+                   for table in ("deals", "contracts", "esign_events") for r in rows.get(table, [])
+                   if r.get("deal_id", r.get("id")) == deal_id and r["known_at"] > rejected_at)
+    return {"fn": "check_resubmission",
+            "args": {"deal_id": deal_id, "field": field, "value": value, "rejected_approval_id": rejected_approval_id,
+                     "rejected_at": rejected_at},
+            "result": {"resubmit": bool(newer), "new_evidence": newer}}
 
 
 def check_termination(rows, rep_id, end_date) -> dict:
@@ -83,4 +103,4 @@ def check_plan_drift(rows, rep_id, version) -> dict:
 
 
 CHECKS = {fn.__name__: fn for fn in (check_splits, check_backdating, check_collection, check_termination,
-                                     check_territory, check_plan_drift)}
+                                     check_territory, check_plan_drift, check_resubmission)}

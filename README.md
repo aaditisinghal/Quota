@@ -63,7 +63,8 @@ column.
 - Seed 1729 was chosen by the builder, not hidden by a teammate.
 - Straight-through counts lines approved or paid with no hold, escalation or dispute; the Controller's routine
   approval of accrual and payroll batches is not counted as a human touch.
-- Not built yet: the SEC 10-K policy citations and the "attack your own controls" exercise.
+- Not built yet: the SEC 10-K policy citations. The "attack your own controls" exercise is below, run as tests
+  rather than by a separate agent.
 
 ## Screens
 
@@ -109,6 +110,33 @@ routine approvals come 30 minutes after a request, so April's $500 amortization 
 | Dispute held | Over the limit, routed on | Churn: ledger health | Trace as of April 30 |
 | --- | --- | --- | --- |
 | ![](docs/screens/1-dispute.png) | ![](docs/screens/2-over-limit.png) | ![](docs/screens/3-churn-ledger-health.png) | ![](docs/screens/4-trace-as-of-april-30.png) |
+
+## Pressure test against SPEC.md
+
+Every behaviour SPEC.md promises was checked against the running build, through the HTTP API and in a browser.
+What broke, and is now fixed with a regression test (`tests/test_spec_pressure.py`, `tests/test_controls.py`):
+
+| Found | Fix |
+| --- | --- |
+| 6 of the 8 rehearsed judge phrases did not map (CFO / Taylor, Alex's split, Riley's backdate, Controller on vacation, approve your own payout) or were refused (Acme never pays) | All 8 map to SPEC's events. The served world now has SPEC's named cast: Alex Chen (Orbit, split 60/40 with Riley), Riley Shah (Summit), Taylor Brooks (Vale, CA, leaves May 8 before Vale pays), and a CFO, Grace Liu |
+| Deals with no signed contract were commissioned on the CRM close date and amount alone | No signed contract, no booking (CRM fields are never trusted alone) |
+| "Approve your own payout" in chat got a clarifying question | The seat attempts it; the write path refuses (`NO_CAPABILITY, INV5_NOT_APPROVED`) and the reply names who can approve |
+| An ambiguous reply ("sounds good, let's discuss") to an open question was ignored | Treated as no answer: one clarifying question per open item |
+| After a rejection, the same exception was resubmitted as a new approval | `resubmission_check`: not resubmitted unless a new deal, contract or e-signature record arrived |
+| The Controller's silence only earned reminders; no CFO existed | Backup chain VP -> Controller -> CFO after 2 business days, or at once when an approver says they are away; an away approver auto-approves nothing |
+| An approval could be decided twice (a rejection flipped to approved), and a backup's decision left the original copy open | Write path refuses `ALREADY_DECIDED` / `ALREADY_SETTLED`; settled copies leave the queue |
+| A split edited to 110% after booking was not noticed | `splits_check` on every CRM split edit: lines held out of payroll, VP asked with the last split that added up |
+| Credit on a deal held for a bad split counted toward attainment | Held credit counts toward nobody's quota until the split is fixed |
+| An overdue notice on a customer billing shows as paid created a collection hold | Billing decides payment status: `collection_check`, no hold, with the payment's id |
+| SPEC's invariant 3 (subledgers tie to the GL) was only a screen | `INV3` is checked with the others (`verify`, the demo report, Ledger health): eight invariants |
+| One bad injected event (an unknown deal) crashed the seat and every later request (HTTP 500) | The injector validates ids, amounts, dates and the plan-year horizon; a served world logs any failing event as ERROR and moves on |
+| `/trace?as_of=garbage` was read as the far future; chat could message nobody | Both refused with 422 |
+
+The control tests try each forbidden action (seats or reps approving, the VP over his limit, the wrong approver,
+second decisions, posting into a locked period, lines without decisions or with bad splits, payroll edits, raw
+edits to a past row) and require a refusal with its reason code, then check that the books still pass every
+invariant, every decision replays, and no as-of trace shows anything known later. After all fixes the eval is
+unchanged: seed 7 and seed 1729 both 40/40, 0 false flags, 0 wrong payouts.
 
 ## Planted errors and what Quota does
 

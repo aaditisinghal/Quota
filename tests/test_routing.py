@@ -13,7 +13,10 @@ def test_routing_tables():
     assert routing.limit("marcus.lee", "plan_exception") == 500_000
     assert routing.limit("priya.nair", "plan_exception") is None
     assert routing.next_approver("plan_exception", 600_000, after="marcus.lee") == "priya.nair"
-    assert routing.next_approver("plan_exception", 600_000, after="priya.nair") is None
+    # The Controller is unlimited, so over-limit routing stops with her; the CFO is only her backup when she is
+    # silent for 2 business days or away (SPEC "Who it asks").
+    assert routing.ESCALATION["priya.nair"] == "grace.liu"
+    assert routing.next_approver("plan_exception", 600_000, after="grace.liu") is None
 
 
 def test_over_limit_routes_to_controller(ledger, wp, ro):

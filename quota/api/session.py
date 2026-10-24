@@ -20,7 +20,7 @@ from quota.agent.personas import PolicyPeople
 from quota.api import views
 from quota.api.chat import RuleExtractor
 from quota.ledger import queries
-from quota.sim import demo_acme, seed_acme
+from quota.sim import demo_acme, demo_cast, seed_acme
 from quota.sim.generator import generate
 
 ACME_START = "2026-04-27T17:00:00Z"
@@ -33,6 +33,7 @@ class Session:
     def __init__(self, world, name: str, mode: str = "scripted", llm=None, seed: int | None = None):
         self.world, self.name, self.mode, self.llm, self.seed = world, name, mode, llm, seed
         self.lock = threading.RLock()
+        world.strict = False     # judges type things: a failing event is logged and contained, never fatal
 
     @property
     def ro(self):
@@ -56,7 +57,8 @@ class Session:
                                        "approver": a["approver"], "amount_cents": a["amount_cents"],
                                        "since": a["known_at"]} for a in queries.pending_approvals(self.ro, now)],
                 "upcoming": [{"at": e.release_at, "type": e.type, "payload": e.payload}
-                             for e in self.world.queue.upcoming()][:20]}
+                             for e in self.world.queue.upcoming()][:20],
+                "away": dict(getattr(self.world.people, "away", {}))}
 
     def messages(self, principal: str | None = None) -> list[dict]:
         rows = queries.fetch_all(self.ro, "SELECT * FROM messages ORDER BY known_at, id")
@@ -70,13 +72,16 @@ class Session:
         self.world.close()
 
 
-def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None) -> Session:
+def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None, cast: bool = True) -> Session:
     """Up to the pause the story is the scripted one in every mode; `live` then reads people's messages with
-    the model and words the analyst's replies with it."""
+    the model and words the analyst's replies with it. `cast` adds SPEC's other named reps (Alex, Riley,
+    Taylor) so the rehearsed judge phrases have someone to happen to."""
     demo = demo_acme.AcmeDemo(db_path, out=lambda line: None, stripe=stripe)
     world = demo.world
     script = demo_acme.load_script()
     seed_acme.seed(world.wp, world.clock, world.emit)
+    if cast:
+        demo_cast.add_cast(world)
     world.run_until(ACME_START)
     world.queue.unschedule(INJECTED_BY_PEOPLE)
     later = [a for a in script["people"]["actions"] if a["at"] > ACME_START and a["do"] != "message"]

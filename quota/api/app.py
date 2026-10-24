@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from quota import clock as clk
 from quota.api import chat as chat_turn
 from quota.api import inject, views
 
@@ -55,6 +56,10 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
 
     @app.get("/trace/{kind}/{object_id}")
     def trace(kind: str, object_id: str, as_of: str | None = None, depth: int = Query(3, ge=0, le=6)):
+        if as_of is not None:
+            if not inject._timestamp(as_of):
+                raise HTTPException(422, f"as_of {as_of!r} is not a date or timestamp")
+            as_of = clk.end_of_day(as_of)            # a bare date means the end of that day
         with session.lock:
             try:
                 graph = views.trace(session.ro, kind, object_id, as_of, depth)

@@ -109,7 +109,7 @@ def test_demo_output_lines(acme_demo):
                      "  6. Deferred commission     $16,500.00 written off (JE-0012)",
                      "  7. Commission expense      -$1,500.00 amortization reversed (JE-0012)",
                      "  8. Jordan Q1 attainment    140.00% -> 100.00% (report only; 2026-Q1 periods locked)",
-                     "INVARIANTS  INV1 OK  INV2 OK  INV4 OK  INV5 OK  INV6 OK  INV7 OK",
+                     "INVARIANTS  INV1 OK  INV2 OK  INV3 OK  INV4 OK  INV5 OK  INV6 OK  INV7 OK",
                      "REPLAY      D-0001 MATCH  D-0005 MATCH  D-0007 MATCH"):
         assert expected in acme_demo.lines
 

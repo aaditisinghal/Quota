@@ -53,12 +53,14 @@ class Seat:
         ev = self.claim_next_event()            # 1 pick up
         if ev is None:
             return None
-        ctx = self.gather(ev)                   # 2 read-only; records (table, id, version, sha256)
-        facts = self.extract(ctx)               # 3 model, verified
-        res = self.reconcile(facts, ctx)        # 4 ranking.py
-        calc = self.calculate(res, ctx)         # 5 calculator/entries
-        decision = self.decide(calc, res, ctx)  # 6 policy code: post|hold|escalate|correct
-        return self.write(decision, ctx)        # 7 WritePath only
+        with self.world.contain(self.principal, ev):
+            ctx = self.gather(ev)                   # 2 read-only; records (table, id, version, sha256)
+            facts = self.extract(ctx)               # 3 model, verified
+            res = self.reconcile(facts, ctx)        # 4 ranking.py
+            calc = self.calculate(res, ctx)         # 5 calculator/entries
+            decision = self.decide(calc, res, ctx)  # 6 policy code: post|hold|escalate|correct
+            return self.write(decision, ctx)        # 7 WritePath only
+        return []
 
     def claim_next_event(self) -> Event | None:
         return self.world.queue.next_for(self.principal, self.handles)

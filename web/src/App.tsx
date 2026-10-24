@@ -111,6 +111,7 @@ export function App() {
           )}
           {tab === "chat" && (
             <ChatPane principal={principal} setPrincipal={setPrincipal} people={people} pending={pending}
+                      away={state?.away ?? {}}
                       version={version} onChange={refresh} />
           )}
           {tab === "today" && <TodayHealth version={version} people={people} />}

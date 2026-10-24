@@ -6,7 +6,8 @@ OWNERS = {"plan_exception": "marcus.lee", "journal_entry": "priya.nair", "payrol
           # Phase 3: who answers questions that are not approvals
           "territory": "marcus.lee", "splits": "marcus.lee", "plan_config": "marcus.lee",
           "material_flag": "priya.nair", "payroll_release": "dana.ortiz"}
-ESCALATION = {"marcus.lee": "priya.nair", "priya.nair": None}
+# Backup approvers (SPEC "Who it asks"): unanswered for 2 business days, or the approver is away.
+ESCALATION = {"marcus.lee": "priya.nair", "priya.nair": "grace.liu", "grace.liu": None}
 
 
 def owner(kind) -> str:

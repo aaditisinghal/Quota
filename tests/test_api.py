@@ -97,7 +97,7 @@ def test_trace_follows_approvals_precedents_and_payroll(finished):
 def test_ledger_health_after_the_whole_story(finished):
     health = finished.get("/ledger/health").json()
     assert all(i["ok"] for i in health["invariants"]) and health["chain"]["ok"]
-    assert {i["name"] for i in health["invariants"]} == {"INV1", "INV2", "INV4", "INV5", "INV6", "INV7", "INV8"}
+    assert {i["name"] for i in health["invariants"]} == {"INV1", "INV2", "INV3", "INV4", "INV5", "INV6", "INV7", "INV8"}
     tb = health["trial_balance"]
     assert tb["debits_cents"] == tb["credits_cents"] == 3_000_000
     balances = {a["account"]: a["balance_cents"] for a in tb["accounts"]}

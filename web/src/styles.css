@@ -219,3 +219,6 @@ details.more { margin-top: 10px; }
 details.more > summary, details.fold > summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; }
 details.more > .cards { margin-top: 10px; }
 details.fold { display: inline; }
+.tl.kind-error { background: var(--line-2); border-left: 3px solid var(--bad); }
+.tl.kind-error .kind { color: var(--bad); font-weight: 700; }
+.person .away { font-size: 11px; color: var(--ink-3); }

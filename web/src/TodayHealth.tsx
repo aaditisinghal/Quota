@@ -119,8 +119,9 @@ function HealthPanel({ health }: { health: Health }) {
         </div>
       </div>
       <p className="muted">
-        INV1 balanced · INV2 locked periods untouched · INV4 every entry decided · INV5 approvals by the right person within limit ·
-        INV6 payroll equals approved lines · INV7 splits add to 100% · INV8 hash chain intact
+        INV1 balanced · INV2 locked periods untouched · INV3 every subledger ties to its GL account · INV4 every entry
+        decided · INV5 approvals by the right person within limit · INV6 payroll equals approved lines · INV7 splits add
+        to 100% · INV8 hash chain intact
       </p>
 
       <div className="grid2">

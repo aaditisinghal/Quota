@@ -28,6 +28,7 @@ JOB_ROUTES = {"commission_run": "commission_run", "payroll_file": "payroll_file"
               "approver_digest": "digest", "approval_followup": "followup"}
 DISPUTE_OUTCOMES = {"held": "held", "conceded": "conceded", "escalation_offered": "escalated"}
 CLARIFY_PREFIX = "I couldn't turn that into something I can check"
+AMBIGUOUS_PREFIX = "I read that as no answer yet"
 EVIDENCE_REF = re.compile(r"\b((?:contracts|deals|esign_events):[A-Za-z0-9-]+(?::v\d+)?)")
 
 
@@ -212,10 +213,27 @@ class CommissionsAnalyst(Seat):
         message = ctx.data["message"]
         claim = extract_claim(self.extractor, message["text"], message["author"], self.now[:4], ctx.data["deals"])
         if claim.kind == "other" and claim.problem is None:
-            ctx.route = "noted"          # thanks, acceptance, chit-chat: nothing to check, nothing to say
+            # Thanks or chit-chat needs nothing. But a reply that is neither yes nor no to something Quota asked
+            # this person ("sounds good, let's discuss") is no answer: one clarifying question.
+            ctx.route = "ambiguous" if self.awaiting_answer(message) else "noted"
+        elif claim.kind == "unavailable":
+            ctx.route = "unavailable"
         else:
             ctx.route = CLAIM_ROUTES.get(claim.kind, "clarify")
         return claim
+
+    def _last_sent_to(self, who) -> dict | None:
+        rows = queries.fetch_all(self.ro, "SELECT * FROM messages WHERE author = ? AND to_principal = ? AND known_at <= ? "
+                                          "ORDER BY known_at, id", (self.principal, who, self.now))
+        return rows[-1] if rows else None
+
+    def awaiting_answer(self, message) -> bool:
+        """Quota is waiting on this person: an approval addressed to them, or Quota's last message to them asked."""
+        author = message["author"]
+        if any(a["approver"] == author for a in self.pending_approvals()):
+            return True
+        last = self._last_sent_to(author)
+        return last is not None and last["text"].rstrip().endswith("?")
 
     # dispute / escalate
 
@@ -292,7 +310,7 @@ class CommissionsAnalyst(Seat):
                     f"{out['at_claim'].quarter}. As resolved {fmt_usd(fields['as_resolved_cents'])} "
                     f"({out['at_resolved'].quarter}, {res['basis']} {res['value']}, {res['rule_id']}); as claimed "
                     f"{fmt_usd(fields['as_claimed_cents'])}. Difference {fmt_usd(fields['diff_cents'])}. "
-                    f"Held {len(held)}x ({', '.join(held)}).")
+                    f"Held {len(held)}x ({', '.join(held)}). Do you grant it?")
             self.send(fields["escalate_to"], note)
             return [decision_id]
         reply = self.llm.draft_reply(fields) if self.llm else disputes.render_reply(fields)
@@ -328,8 +346,56 @@ class CommissionsAnalyst(Seat):
         if ctx.data["granted_by"]:
             ctx.route = "already_granted"
             return None
+        declined = self.declined_proposal(deal["id"], claim.field, value)
+        if declined is not None:
+            rows = {"deals": queries.fetch_all(self.ro, "SELECT * FROM deals WHERE id = ? AND known_at <= ?",
+                                               (deal["id"], self.now)),
+                    "contracts": queries.fetch_all(self.ro, "SELECT * FROM contracts WHERE deal_id = ? AND known_at <= ?",
+                                                   (deal["id"], self.now)),
+                    "esign_events": queries.fetch_all(self.ro, "SELECT * FROM esign_events WHERE deal_id = ? "
+                                                               "AND known_at <= ?", (deal["id"], self.now)),
+                    "messages": [message]}
+            check = checks.check_resubmission(rows, deal["id"], claim.field, value, declined["approval_id"],
+                                              declined["known_at"])
+            if not check["result"]["resubmit"]:
+                ctx.route = "declined_before"
+                ctx.rows, ctx.data["declined"], ctx.data["check"] = rows, declined, check
+                return None
         ctx.rows = queries.commission_rows(self.ro, deal["owner_id"], self.now)
         return {"deal_id": deal["id"], "rep_id": deal["owner_id"], "field": claim.field, "value": value}
+
+    def declined_proposal(self, deal_id, field, value) -> dict | None:
+        """The latest rejection of a plan exception proposing the same deal, field and value."""
+        found = None
+        for d in queries.fetch_all(self.ro, """
+                SELECT d.*, a.subject_id FROM approval_decisions d JOIN approvals a ON a.id = d.approval_id
+                WHERE a.kind = 'plan_exception' AND d.decision = 'rejected' AND d.known_at <= ?
+                ORDER BY d.known_at, d.rowid""", (self.now,)):
+            root = self.approval_root(d["approval_id"])
+            source = self.get("messages", root["subject_id"])
+            if source is None:
+                continue
+            claim = extract_claim(self.extractor, source["text"], source["author"], self.now[:4], self.deal_names())
+            proposed = claim.amount_cents if claim.field == "base" else claim.asserted_value
+            if (claim.kind, claim.deal_ref, claim.field, proposed) == ("exception_grant", deal_id, field, value):
+                found = d
+        return found
+
+    def write_declined_before(self, ctx):
+        message, declined, check = ctx.data["message"], ctx.data["declined"], ctx.data["check"]
+        who = config.display_name(declined["decided_by"])
+        args = check["args"]
+        text = (f"not resubmitted: {declined['approval_id']} proposing {args['field']} = {args['value']} for "
+                f"{args['deal_id']} was declined by {declined['decided_by']} at {declined['known_at']} and nothing "
+                f"new is on record since")
+        decision_id = self.wp.record_decision(self.principal, "resubmission_check", message["id"],
+                                              queries.input_refs(ctx.rows), {}, [], check, "refused", text)
+        self.emit("DECISION", f"{decision_id} resubmission_check {message['id']}: {text}")
+        self.send(message["author"], f"{who} declined that exact exception ({declined['approval_id']}): "
+                                     f"\"{declined['reason']}\". I resubmit only with new evidence, such as a new "
+                                     f"contract, CRM or e-signature record for {args['deal_id']} ({decision_id}).",
+                  "REPLY")
+        return [decision_id]
 
     def calculate_exception(self, ctx):
         r = ctx.res
@@ -390,13 +456,62 @@ class CommissionsAnalyst(Seat):
     def reconcile_chat_approval(self, ctx):
         ref = (ctx.facts.line_ref or "").upper()
         if not ref.startswith("A-"):
-            ctx.route = "clarify"
-            return None
+            # "Approve your own payout", "pay Taylor anyway": the payout line the message is about. The seat tries
+            # it and the write path decides, so the refusal is on the record (SPEC judge phrases).
+            line = self.payout_named(ctx.data["message"]) if ctx.facts.kind == "approval" else None
+            ctx.route = "approve_line" if line else "clarify"
+            return line
         approval = self.get("approvals", ref)
         if approval is None:
             ctx.route = "no_such_approval"
             ctx.data["ref"] = ref
         return approval
+
+    def payout_named(self, message) -> dict | None:
+        """The newest live payout line of a rep the message names (first name or id), else of its author."""
+        text = message["text"].lower()
+        named = [p for p, spec in config.PRINCIPALS.items() if spec.get("kind") == "human"
+                 and (re.search(rf"\b{re.escape(spec['name'].split()[0].lower())}\b", text) or p in text)]
+        for rep in named + [message["author"]]:
+            live = [l for l in self.lines(rep_id=rep) if l["amount_cents"] > 0
+                    and self.line_status(l["id"]) in ("draft", "approved")]
+            if live:
+                return live[-1]
+        return None
+
+    def hold_on(self, line) -> dict | None:
+        """The standing hold decision keeping this line out of payroll, if any."""
+        for decision in reversed(self.decisions(kind="termination_review")):
+            if line["id"] in json.loads(decision["output_json"])["result"]["held"]:
+                return decision
+        for decision in reversed(self.decisions(kind="collection_hold", subject_id=line["deal_id"])):
+            if not queries.collected(self.ro, line["deal_id"], self.now):
+                return decision
+        for decision in reversed(self.decisions(kind="splits_check", subject_id=line["deal_id"])):
+            if self.splits_invalid(line["deal_id"]):
+                return decision
+        return None
+
+    def write_approve_line(self, ctx):
+        line, message = ctx.res, ctx.data["message"]
+        approver, release = routing.owner("journal_entry"), routing.owner("payroll_release")
+        try:
+            self.wp.set_line_status(self.principal, line["id"], "approved")
+        except Refused as refused:
+            self.emit("REFUSED", f"{refused.refusal_id} set_line_status {line['id']} -> approved: "
+                                 f"{', '.join(refused.reason_codes)}")
+            hold = self.hold_on(line)
+            exception_owner = routing.owner("plan_exception")
+            held = (f" {line['id']} is also held: {hold['explanation']} ({hold['id']}). Paying it anyway is a plan "
+                    f"exception for {config.display_name(exception_owner)} (up to "
+                    f"{fmt_usd(routing.limit(exception_owner, 'plan_exception'))}) and "
+                    f"{config.display_name(approver)} above that.") if hold else ""
+            self.send(message["author"], f"I can't approve {line['id']} ({config.display_name(line['rep_id'])}, "
+                                         f"{fmt_usd(line['amount_cents'])}): {', '.join(refused.reason_codes)} "
+                                         f"({refused.refusal_id}). I draft payouts; {config.display_name(approver)} "
+                                         f"({config.title(approver)}) approves them and "
+                                         f"{config.display_name(release)} releases payroll.{held}", "REPLY")
+        return []
 
     def write_no_such_approval(self, ctx):
         self.send(ctx.data["message"]["author"], f"There is no approval {ctx.data['ref']}; nothing was approved.",
@@ -429,6 +544,50 @@ class CommissionsAnalyst(Seat):
         reason = f" ({claim.problem})" if claim.problem else ""
         self.send(message["author"], f"{CLARIFY_PREFIX}{reason}. Which deal or commission line do you mean, and what "
                                      f"do you think the right value is?", "REPLY")
+        return []
+
+    def write_ambiguous(self, ctx):
+        author = ctx.data["message"]["author"]
+        pending = [a for a in self.pending_approvals() if a["approver"] == author]
+        if pending:
+            a = pending[-1]
+            item = a["id"]
+            ask = (f"is that a yes on {a['id']} ({a['kind'].replace('_', ' ')} on {a['subject_id']}, "
+                   f"{fmt_usd(a['amount_cents'])})? Reply \"approve {a['id']}\" or \"reject {a['id']}\" with a "
+                   f"reason; until then it stays open, and silence never approves.")
+        else:
+            item = "do you grant it?"
+            ask = "do you grant it? Say what you approve (the deal and the value), or say no. Until then nothing changes."
+        last = self._last_sent_to(author)
+        if last is not None and last["text"].startswith(AMBIGUOUS_PREFIX) and item in last["text"]:
+            return []                    # one clarifying question per open item, never the same one twice
+        self.send(author, f"{AMBIGUOUS_PREFIX}: {ask}", "REPLY")
+        return []
+
+    def write_unavailable(self, ctx):
+        """An approver says they are away: what waits on them goes to their backup now, not after 2 days."""
+        message = ctx.data["message"]
+        author, until = message["author"], ctx.facts.asserted_value
+        backup = routing.ESCALATION.get(author)
+        moved = []
+        for approval in [a for a in self.pending_approvals() if a["approver"] == author]:
+            if backup is None or any(a["approver"] == backup and a["subject_id"] == approval["subject_id"]
+                                     and a["kind"] == approval["kind"] for a in self.pending_approvals()):
+                continue
+            routed = self.wp.request_approval(self.principal, approval["kind"], approval["subject_id"],
+                                              approval["amount_cents"], approver=backup)
+            self.emit("APPROVAL", f"{routed} {approval['kind']} {approval['subject_id']} "
+                                  f"{fmt_usd(approval['amount_cents'])} -> {backup}: {author} is away"
+                                  + (f" until {until}" if until else "") + f" ({approval['id']})")
+            moved.append((approval["id"], routed))
+        away = config.display_name(author) + (f" is away until {until}" if until else " is away")
+        if moved:
+            self.send(backup, f"{away}, so these now wait on you: "
+                      + ", ".join(f"{routed} (was {original})" for original, routed in moved) + ".")
+        target = f"{config.display_name(backup)} ({config.title(backup)})" if backup else "nobody (no backup on record)"
+        self.send(author, f"Noted. While you are away, approvals for you go to {target}"
+                          + (f"; moved now: {', '.join(r for _, r in moved)}" if moved else "")
+                          + ". Silence never approves.", "REPLY")
         return []
 
     # ---------- approval.decided on a plan exception ----------
@@ -479,8 +638,11 @@ class CommissionsAnalyst(Seat):
             line = self.current_line(ctx.facts.deal_ref, self.get("deals", ctx.facts.deal_ref)["owner_id"]) \
                 if ctx.facts.deal_ref else None
             if line is not None:
+                decided = ctx.event.payload["approval_id"]
+                root = ctx.data["root"]["id"]
+                ids = decided if decided == root else f"{decided}, routed from {root}"
                 self.send(line["rep_id"], f"{config.display_name(ctx.data['decided_by'])} declined the exception "
-                                          f"({ctx.data['root']['id']}): \"{ctx.data['reason']}\". {line['id']} stays at "
+                                          f"({ids}): \"{ctx.data['reason']}\". {line['id']} stays at "
                                           f"{fmt_usd(line['amount_cents'])}.", "REPLY")
             return []
         if ctx.res != "granted":
@@ -511,6 +673,9 @@ class CommissionsAnalyst(Seat):
                 held |= {l["id"] for l in self.lines(deal_id=decision["subject_id"])}
         for decision in self.decisions(kind="termination_review"):
             held |= set(json.loads(decision["output_json"])["result"]["held"])
+        for deal_id in {d["subject_id"] for d in self.decisions(kind="splits_check")}:
+            if self.splits_invalid(deal_id):
+                held |= {l["id"] for l in self.lines(deal_id=deal_id)}
         return held
 
     def reconcile_payroll_file(self, ctx):
@@ -549,8 +714,8 @@ class CommissionsAnalyst(Seat):
 
     def write_followup(self, ctx):
         approval = self.get("approvals", ctx.event.payload["approval_id"])
-        if queries.approval_decision(self.ro, approval["id"], self.now) is not None:
-            return []
+        if approval["id"] not in {a["id"] for a in self.pending_approvals()}:
+            return []                    # decided, or settled by a backup approver in the meantime
         waited = f"{approval['id']} ({approval['kind']} {approval['subject_id']}) has waited " \
                  f"{config.ESCALATE_AFTER_BUSINESS_DAYS} business days"
         backup = routing.ESCALATION.get(approval["approver"])
@@ -615,8 +780,37 @@ class CommissionsAnalyst(Seat):
     def calculate_deal_updated(self, ctx):
         return checks.check_backdating(ctx.rows, ctx.event.payload["deal_id"], ctx.data["locked_at"])
 
+    def splits_invalid(self, deal_id) -> bool:
+        deal = self.get("deals", deal_id)
+        return deal is not None and ranking.splits_total(ranking.resolve_splits(deal, [])) != 10000
+
+    def write_split_edit(self, ctx) -> list[str]:
+        """E02 after booking: a CRM edit leaves credit not adding up to 100%. Hold the deal's lines out of payroll
+        and ask the VP, proposing the last split that did add up."""
+        deal_id = ctx.event.payload["deal_id"]
+        versions = ctx.rows["deals"]
+        if "splits" not in ctx.event.payload["fields"] or not self.splits_invalid(deal_id):
+            return []
+        output = checks.check_splits({"deals": versions[-1:]}, deal_id)
+        shares = " + ".join(f"{s['rep']} {s['bps'] / 100:g}%" for s in output["result"]["splits"])
+        previous = json.loads(versions[-2]["splits_json"]) if len(versions) > 1 else []
+        proposal = (" + ".join(f"{s['rep']} {s['bps'] / 100:g}%" for s in previous)
+                    if sum(s["bps"] for s in previous) == 10000 else None)
+        held = [l["id"] for l in self.lines(deal_id=deal_id) if l["amount_cents"] > 0
+                and self.line_status(l["id"]) in ("draft", "approved")]
+        owner, deal = routing.owner("splits"), versions[-1]
+        text = (f"credit on {deal_id} edited to {output['result']['total_bps'] / 100:g}% ({shares}) by {deal['source']}; "
+                + (f"lines {', '.join(held)} held out of payroll" if held else "no lines")
+                + f" until {owner} confirms the split")
+        return [self.flag("splits_check", deal_id, {"deals": versions[-1:]}, output, "held", text,
+                          [(owner, f"{deal['account']} ({deal_id}) now credits {shares}, which is "
+                                   f"{output['result']['total_bps'] / 100:g}%. "
+                                   + (f"Lines {', '.join(held)} are held. " if held else "")
+                                   + (f"The last split that added up was {proposal}. " if proposal else "")
+                                   + "What is the approved split?")])]
+
     def write_deal_updated(self, ctx):
-        decision_ids = []
+        decision_ids = self.write_split_edit(ctx)
         result = ctx.calc["result"]
         if result["backdated"]:
             deal_id = ctx.event.payload["deal_id"]
@@ -636,15 +830,26 @@ class CommissionsAnalyst(Seat):
         deal = self.get("deals", ctx.event.payload["deal_id"])
         ctx.rows = {"deals": [deal], "plans": queries.fetch_all(
             self.ro, "SELECT * FROM plans WHERE rep_id = ? AND known_at <= ? ORDER BY version", (deal["owner_id"], self.now))}
+        payments = queries.fetch_all(self.ro, "SELECT * FROM billing WHERE deal_id = ? AND kind = 'payment' "
+                                              "AND known_at <= ?", (deal["id"], self.now))
+        if payments:
+            ctx.rows["billing"] = payments
 
     def calculate_overdue(self, ctx):
         return checks.check_collection(ctx.rows, ctx.event.payload["deal_id"], ctx.event.payload["days"])
 
     def write_overdue(self, ctx):
         result, deal = ctx.calc["result"], ctx.rows["deals"][0]
+        days = ctx.event.payload["days"]
+        if result["paid"] is not None:
+            paid = result["paid"]
+            ref = f", {paid['external_ref']}" if paid.get("external_ref") not in (None, paid["id"]) else ""
+            return [self.flag("collection_check", deal["id"], ctx.rows, ctx.calc, "posted",
+                              f"no collection hold: a {days}-day overdue notice for {deal['account']}, but billing "
+                              f"shows {fmt_usd(paid['amount_cents'])} paid at {paid['at']} ({paid['id']}{ref}); "
+                              f"payment status comes from billing")]
         if not result["held"]:
             return []
-        days = ctx.event.payload["days"]
         text = (f"collection hold: {deal['account']} is {days} days late (plan holds at {result['hold_days']}); "
                 f"commission waits for payment")
         reps = sorted({s["rep"] for s in json.loads(deal["splits_json"])})

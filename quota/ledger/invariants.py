@@ -111,7 +111,52 @@ def check_inv7(conn) -> list[Violation]:
     return out
 
 
-CHECKS = {"INV1": check_inv1, "INV2": check_inv2, "INV4": check_inv4, "INV5": check_inv5,
+def _gl(tb, account):
+    return tb.get(account, 0)
+
+
+def tie_outs(conn, t=None) -> list[dict]:
+    """Subledger to GL: each pair is computed from different records, so they agree only if the books do."""
+    tb = queries.trial_balance(conn, t)
+    lines = [{**l, "status": queries.line_status(conn, l["id"], t)}
+             for l in queries.fetch_all(conn, "SELECT * FROM commission_lines WHERE known_at <= ?", (t or queries.END_OF_TIME,))]
+    payable = sum(l["amount_cents"] for l in lines if l["amount_cents"] > 0 and l["status"] == "approved")
+    recoverable = sum(-l["amount_cents"] for l in lines if l["amount_cents"] < 0 and l["status"] == "approved")
+    amortized: dict[str, int] = {}
+    in_transit = 0
+    for entry in queries.journal(conn, t):
+        kind = queries.memo_kind(entry["memo"])
+        for l in entry["lines"]:
+            if kind == "amortization" and entry["status"] == "posted" and l["account"] == "6110":
+                amortized[l["subledger_ref"]] = amortized.get(l["subledger_ref"], 0) + l["debit_cents"]
+            if kind in ("clawback", "void_reversal") and entry["status"] != "posted" and l["account"] == "1350":
+                in_transit += l["credit_cents"]
+    schedules = queries.fetch_all(conn, "SELECT * FROM amortization_schedules WHERE known_at <= ?",
+                                  (t or queries.END_OF_TIME,))
+    cancelled = {s["id"][:-2] for s in schedules if s["status"] == "cancelled"}
+    remaining = sum(s["total_cents"] - amortized.get(s["line_id"], 0) for s in schedules
+                    if s["status"] == "active" and s["id"] not in cancelled)
+    billing = queries.fetch_all(conn, "SELECT kind, amount_cents FROM billing WHERE known_at <= ?", (t or queries.END_OF_TIME,))
+    receivable = sum(b["amount_cents"] if b["kind"] == "invoice" else -b["amount_cents"]
+                     for b in billing if b["kind"] in ("invoice", "payment"))
+    pairs = [
+        ("Deferred commissions (1350)", "unamortized schedules + recoveries awaiting approval", _gl(tb, "1350"),
+         remaining + in_transit),
+        ("Commissions payable (2150)", "approved, unpaid commission lines", -_gl(tb, "2150"), payable),
+        ("Due from employees (1290)", "approved recovery lines", _gl(tb, "1290"), recoverable),
+        ("Accounts receivable (1200)", "invoices less payments in billing", _gl(tb, "1200"), receivable),
+    ]
+    return [{"name": n, "subledger": s, "gl_cents": g, "subledger_cents": v, "ok": g == v} for n, s, g, v in pairs]
+
+
+def check_inv3(conn) -> list[Violation]:
+    """SPEC invariant 3: every subledger ties to its GL account (commissions payable, deferred commissions,
+    recoveries due from reps, receivables)."""
+    return [Violation("INV3", t["name"], f"GL {t['gl_cents']} != subledger {t['subledger_cents']} ({t['subledger']})")
+            for t in tie_outs(conn) if not t["ok"]]
+
+
+CHECKS = {"INV1": check_inv1, "INV2": check_inv2, "INV3": check_inv3, "INV4": check_inv4, "INV5": check_inv5,
           "INV6": check_inv6, "INV7": check_inv7}
 
 

@@ -5,6 +5,7 @@ and lets everyone settle at each instant: released events go to their queues, pe
 system and each seat drain their queues, repeated until nothing moves.
 """
 
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -42,14 +43,15 @@ class BillingSystem:
         ev = self.world.queue.next_for(self.principal, self.handles)
         if ev is None:
             return None
-        status = "handled"
-        if ev.type in self.KINDS:
-            self._mirror(ev)
-        elif ev.payload["job"] == "revenue_recognition":
-            self._recognize(ev.payload["period"])
-        else:
-            status = "ignored"
-        self.world.wp.mark_event(self.principal, ev.id, status)
+        with self.world.contain(self.principal, ev):
+            status = "handled"
+            if ev.type in self.KINDS:
+                self._mirror(ev)
+            elif ev.payload["job"] == "revenue_recognition":
+                self._recognize(ev.payload["period"])
+            else:
+                status = "ignored"
+            self.world.wp.mark_event(self.principal, ev.id, status)
         return []
 
     def _mirror(self, ev):
@@ -118,8 +120,9 @@ class RecordsSystem:
         ev = self.world.queue.next_for(self.principal, self.handles)
         if ev is None:
             return None
-        getattr(self, "_" + ev.type.replace(".", "_"))(ev.payload)
-        self.world.wp.mark_event(self.principal, ev.id, "handled")
+        with self.world.contain(self.principal, ev):
+            getattr(self, "_" + ev.type.replace(".", "_"))(ev.payload)
+            self.world.wp.mark_event(self.principal, ev.id, "handled")
         return []
 
     def _latest(self, table, row_id):
@@ -197,6 +200,19 @@ class World:
         self.billing = BillingSystem(self, stripe)
         self.seats = []          # drained in this order at every instant, after records and billing
         self.people = None
+        self.strict = True       # tests and the CLI fail loudly; a served world contains a failing event instead
+
+    @contextmanager
+    def contain(self, actor, ev):
+        """Run one actor's handling of one event. In a served world (strict off) an unexpected error is logged as
+        an ERROR line and the event is marked failed, so it is not retried forever and the world keeps going."""
+        try:
+            yield
+        except Exception as exc:
+            if self.strict:
+                raise
+            self.emit(actor, "ERROR", f"{ev.id} {ev.type} not processed: {type(exc).__name__}: {exc}")
+            self.wp.mark_event(actor, ev.id, "failed")
 
     def emit(self, actor, kind, text):
         line = format_line(self.clock.now(), actor, kind, text)

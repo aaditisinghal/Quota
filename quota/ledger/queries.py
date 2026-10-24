@@ -110,11 +110,15 @@ def approval_decision(conn, approval_id, t=None) -> dict | None:
 
 
 def pending_approvals(conn, t) -> list[dict]:
-    """Approvals with no decision as of t."""
+    """Approvals with no decision as of t whose matter is still open: once another approval for the same kind
+    and subject is final or rejected (a backup approver decided it), the other copies are no longer waiting."""
     return fetch_all(conn, """
         SELECT a.* FROM approvals a WHERE a.known_at <= ?
           AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.approval_id = a.id AND d.known_at <= ?)
-        ORDER BY a.id""", (t, t))
+          AND NOT EXISTS (SELECT 1 FROM approvals b JOIN approval_decisions e ON e.approval_id = b.id
+                          WHERE b.kind = a.kind AND b.subject_id = a.subject_id AND b.id != a.id
+                            AND e.result IN ('final', 'rejected') AND e.known_at <= ?)
+        ORDER BY a.id""", (t, t, t))
 
 
 def collected(conn, deal_id, t) -> bool:

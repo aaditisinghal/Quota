@@ -143,7 +143,10 @@ def rep_bookings(rows, rep_id, now, overrides=None) -> dict[str, Booking]:
     for deal in latest_by_id(rows.get("deals")).values():
         resolved = resolve_deal(rows, deal, rep_id, now)
         bps = ranking.split_bps(resolved["splits"], rep_id)
-        if bps <= 0 or resolved["booking_date"].value is None:
+        # No signed contract, no booking: a CRM close date or CRM amount is never trusted alone (SPEC source
+        # ranking), so a deal waits until its contract is countersigned.
+        if (bps <= 0 or resolved["booking_date"].value is None or resolved["booking_date"].basis == "crm_close_date"
+                or resolved["base"].basis == "crm"):
             continue
         out[deal["id"]] = Booking(deal["id"], rep_id, resolved["booking_date"].value, resolved["base"].value, bps)
         for key, signed_at, increase, _ in amendment_bookings(rows, deal["id"]):
@@ -155,12 +158,20 @@ def rep_bookings(rows, rep_id, now, overrides=None) -> dict[str, Booking]:
     return out
 
 
+def attainment_bookings(rows, bookings: dict[str, Booking]) -> list[Booking]:
+    """Bookings that count toward attainment. Credit on a deal whose splits do not add up to 100% is held for
+    everyone (E02), so it counts toward nobody's quota until the split is fixed."""
+    deals = latest_by_id(rows.get("deals"))
+    return [b for key, b in bookings.items() if ranking.splits_total(
+        ranking.resolve_splits(deals[key.split("+")[0]], rows.get("split_records", []))) == 10000]
+
+
 def evaluate(rows, deal_id, rep_id, now, booking_ts=None, base_cents=None) -> CommissionResult:
     """Commission for one deal, optionally with the booking timestamp or base replaced."""
     bookings = rep_bookings(rows, rep_id, now, {deal_id: {"booking_ts": booking_ts, "base_cents": base_cents}})
     this = bookings[deal_id]
     plan = plan_for(rows, rep_id, this.booking_ts)
-    return calc_commission(plan, this, prior_credit(list(bookings.values()), this))
+    return calc_commission(plan, this, prior_credit(attainment_bookings(rows, bookings), this))
 
 
 def _increment_resolutions(rows, key, rep_id, now) -> dict[str, ranking.Resolution]:
@@ -188,7 +199,7 @@ def commission_decision(rows, deal_id, rep_id, now) -> dict:
             resolved["base"], lambda v: evaluate(rows, deal_id, rep_id, now, base_cents=v).amount_cents)
     bookings = rep_bookings(rows, rep_id, now)
     this = bookings[deal_id]
-    prior = prior_credit(list(bookings.values()), this)
+    prior = prior_credit(attainment_bookings(rows, bookings), this)
     plan = plan_for(rows, rep_id, this.booking_ts)
     result = calc_commission(plan, this, prior)
     output = {

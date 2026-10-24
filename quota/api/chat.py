@@ -18,6 +18,7 @@ from quota.api import views
 from quota.ledger import queries
 
 ANALYST = "seat:commissions_analyst"
+MAX_TEXT = 4000
 COMMAND = re.compile(r"^\s*(approve|reject)\s+(A-\d{4})\b[\s:,.\-]*(.*)$", re.I | re.S)
 
 _MONTH = "|".join(sorted({m for full in MONTHS for m in (full, full[:3], "sept")}, key=len, reverse=True))
@@ -32,6 +33,9 @@ _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
 
 GRANT_WORDS = re.compile(r"\b(honou?r|grant|make an exception|exception|allow)\b", re.I)
 SPIFF_WORDS = re.compile(r"\b(spiff?s?|bonus)\b", re.I)
+AWAY_WORDS = re.compile(r"\b(on vacation|on holiday|out of (?:the )?office|OOO|on leave|away until|unavailable)\b",
+                        re.I)
+PAY_ANYWAY = re.compile(r"\b(?:pay|release)\b[^.!?]*?\b(?:anyway|regardless|now|today)\b", re.I)
 
 
 def month_number(name: str) -> int:
@@ -90,6 +94,11 @@ class RuleExtractor:
             return blank_claim(kind, line_ref=m.group(2).upper(), quote=m.group(0))
         if m := re.search(r"\bescalate\b", text, re.I):
             return blank_claim("escalate", quote=m.group(0))
+        if m := AWAY_WORDS.search(text):
+            until = find_date(text, year)
+            day = until[0] if until and len(until[0]) == 10 else None
+            return blank_claim("unavailable", asserted_value=day,
+                               quote=sentence_with(text, until[1]) if day else m.group(0))
         deal = find_deal(text, deals)
         line = re.search(r"\bCL-\d{4}\b", text, re.I)
         date, money = find_date(text, year), find_money(text)
@@ -103,8 +112,8 @@ class RuleExtractor:
                                quote=sentence_with(text, date[1]))
         if money and (deal or line):
             return blank_claim(kind, **ref, field="base", amount_cents=money[0], quote=sentence_with(text, money[1]))
-        if re.search(r"\bapprove\b", text, re.I):
-            return blank_claim("approval", quote=re.search(r"\bapprove\b", text, re.I).group(0))
+        if m := PAY_ANYWAY.search(text) or re.search(r"\bapprove\b", text, re.I):
+            return blank_claim("approval", quote=m.group(0))
         return blank_claim()
 
 
@@ -117,6 +126,10 @@ def chat(session, as_principal: str, text: str, to: str | None = None) -> dict:
     text = (text or "").strip()
     if not text:
         raise ValueError("empty message")
+    if len(text) > MAX_TEXT:
+        raise ValueError(f"a chat message is at most {MAX_TEXT} characters")
+    if to is not None and to not in people | {ANALYST}:
+        raise ValueError(f"{to} is not someone you can message; write to {ANALYST} or a person")
     since = len(world.feed)
     world.run_until(clk.add_minutes(world.clock.now(), 1))
     started = world.clock.now()

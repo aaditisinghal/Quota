@@ -163,9 +163,10 @@ class WritePath:
             return self._insert(table, row)
 
     def mark_event(self, actor, event_id, status) -> None:
-        """Record that `actor` picked up an event: handled, or ignored as not its business."""
-        if status not in ("handled", "ignored"):
-            raise ValueError(f"event status must be handled or ignored, not {status}")
+        """Record that `actor` picked up an event: handled, ignored as not its business, or failed (a served
+        world logs the error and moves on rather than retrying the same event forever)."""
+        if status not in ("handled", "ignored", "failed"):
+            raise ValueError(f"event status must be handled, ignored or failed, not {status}")
         event = queries.as_of(self.conn, "events", event_id, None)
         if event is None:
             raise KeyError(f"unknown event {event_id}")
@@ -338,6 +339,15 @@ class WritePath:
             codes.append("INV5_SELF_APPROVAL")
         if actor != approval["approver"]:
             codes.append("INV5_WRONG_APPROVER")
+        # A decision is final: no second decision on the same approval (a rejection cannot be flipped), and none
+        # on a copy whose matter another approver (a backup) has already settled.
+        if queries.fetch_one(self.conn, "SELECT 1 FROM approval_decisions WHERE approval_id = ?", (approval_id,)):
+            codes.append("ALREADY_DECIDED")
+        elif queries.fetch_one(self.conn, """
+                SELECT 1 FROM approvals b JOIN approval_decisions e ON e.approval_id = b.id
+                WHERE b.kind = ? AND b.subject_id = ? AND b.id != ? AND e.result IN ('final', 'rejected')""",
+                               (approval["kind"], approval["subject_id"], approval_id)):
+            codes.append("ALREADY_SETTLED")
         self._check(actor, "decide_approval", approval_id, codes,
                     f"{approval['kind']} {approval['subject_id']} requested by {approval['requested_by']}, "
                     f"approver {approval['approver']}")

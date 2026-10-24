@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from quota.agent.extract import verify_claim
 from quota.api.app import create_app
 from quota.api.chat import RuleExtractor, find_date
-from quota.api.inject import rule_intents
+from quota.api.inject import World, rule_intents
 from quota.api.session import acme_session
 from quota.ledger import queries
 
@@ -18,6 +18,14 @@ DEALS = {"acme": "Acme Robotics", "birch": "Birch Health"}
 @pytest.fixture()
 def client():
     session = acme_session()
+    yield TestClient(create_app(session, static_dir="no-static"))
+    session.close()
+
+
+@pytest.fixture()
+def plain():
+    """The Acme world without SPEC's other named reps, so its books can be compared to the script exactly."""
+    session = acme_session(cast=False)
     yield TestClient(create_app(session, static_dir="no-static"))
     session.close()
 
@@ -36,7 +44,8 @@ def inject(client, text):
     return parsed, ran.json()
 
 
-def test_the_spec_demo_flow_through_the_api_gives_the_scripted_books(client):
+def test_the_spec_demo_flow_through_the_api_gives_the_scripted_books(plain):
+    client = plain
     reply = say(client, "jordan.kim", "Acme closed Mar 31. It should count in Q1 at the 1.5x accelerator.")
     assert "Difference: $12,000.00 vs $18,000.00 = $6,000.00" in reply["replies"][0]["text"]
     say(client, "jordan.kim", "Come on, everyone knows it closed in March.")
@@ -87,10 +96,20 @@ def test_chat_moves_the_clock_a_minute_and_small_talk_gets_no_reply(client):
 
 
 def test_an_unreadable_dispute_gets_one_clarifying_question(client):
-    vague = say(client, "jordan.kim", "Can you approve my payout?")
+    vague = say(client, "jordan.kim", "CL-0099 should be $500")          # no such line
     assert vague["replies"][0]["text"].startswith("I couldn't turn that")
-    again = say(client, "jordan.kim", "Please approve my payout?")
+    again = say(client, "jordan.kim", "CL-0098 should be $400")
     assert again["replies"] == []                                   # never the same question twice in a row
+
+
+def test_asked_to_approve_its_own_payout_the_seat_tries_and_the_write_path_refuses(client):
+    turn = say(client, "jordan.kim", "Approve your own payout")
+    refused = [i for i in turn["timeline"] if i["kind"] == "REFUSED"]
+    assert refused and "set_line_status CL-0001 -> approved" in refused[0]["text"]
+    assert "NO_CAPABILITY" in refused[0]["codes"]
+    assert turn["replies"][0]["text"].startswith("I can't approve CL-0001 (Jordan Kim, $12,000.00)")
+    session = client.app.state.session
+    assert queries.line_status(session.ro, "CL-0001") == "draft"           # nothing changed
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -170,13 +189,16 @@ def test_inject_run_refuses_bad_events(client):
     assert client.get("/state").json()["clock"] == "2026-04-27T17:00:00Z"                   # nothing ran
 
 
-@pytest.mark.parametrize("text, days", [("Acme never pays", None), ("Acme is 95 days overdue", 95)])
-def test_overdue_phrases_and_a_paid_customer_cannot_be_late(client, text, days):
-    assert rule_intents(text, DEALS, {"jordan.kim": "Jordan Kim"}, "2026") == [{
-        "kind": "overdue", "deal": "acme", "rep": None, "date": None, "days": days, "money_back": None,
-        "splits": None, "author": None, "text": None}]
-    parsed = client.post("/inject/parse", json={"text": text}).json()
-    assert parsed["reason"] == "acme has no unpaid invoice to be late on"         # Acme paid on April 15
+@pytest.mark.parametrize("text, days", [("Acme never pays", 91), ("Acme is 95 days overdue", 95)])
+def test_an_overdue_notice_on_a_paid_customer_holds_nothing(client, text, days):
+    w = World(deals=DEALS, people={"jordan.kim": {"name": "Jordan Kim", "title": "AE"}}, year="2026")
+    assert rule_intents(text, w)[0]["kind"] == "overdue"
+    parsed, ran = inject(client, text)
+    assert [(e["type"], e["payload"]) for e in parsed["events"]] == [("payment.overdue",
+                                                                     {"deal_id": "acme", "days": days})]
+    decision = next(i for i in ran["timeline"] if i["kind"] == "DECISION")
+    assert "collection_check acme: no collection hold" in decision["text"] and "acme-pay-1" in decision["text"]
+    assert client.get("/today").json()["held"] == []                          # billing says Acme paid on April 15
 
 
 class FakeLLM:

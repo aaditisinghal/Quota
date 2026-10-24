@@ -3,13 +3,17 @@ import { api, type InjectEvent, type Parsed, type Principal, type Scorecard, typ
 import { Money, usd, when } from "./format";
 import { TimelineRow } from "./Timeline";
 
+// SPEC "Judge phrases to rehearse", plus moving the clock.
 const EXAMPLES = [
-  "Acme churns in June with money back",
-  "Advance the clock to May 15",
+  "Acme churns in June and wants its money back",
   "Jordan says his manager promised him a SPIF",
-  "Move Acme's close date to March 30",
-  "Split Acme 60/50 between Jordan and Morgan",
-  "Jordan is terminated on June 1",
+  "The CFO says pay Taylor anyway",
+  "Change Alex's split to 70/40",
+  "Riley moves the close date back to March 30",
+  "Acme never pays",
+  "The Controller is on vacation",
+  "Approve your own payout",
+  "Advance the clock to May 15",
 ];
 
 const ERROR_TYPES: Record<string, string> = {

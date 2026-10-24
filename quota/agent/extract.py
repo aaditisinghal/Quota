@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from quota import config
 from quota.agent.llm import MONTHS, LLMError, schema_errors
 
-CLAIM_KINDS = ["dispute", "exception_grant", "spiff_claim", "escalate", "approval", "rejection", "other"]
+CLAIM_KINDS = ["dispute", "exception_grant", "spiff_claim", "escalate", "approval", "rejection", "unavailable",
+               "other"]
 CLAIM_FIELDS = ["booking_date", "base", "splits", "amount"]
 CLAIM_AUTHORITY = {"exception_grant": "approve:plan_exception", "spiff_claim": "approve:plan_exception"}
 
@@ -42,8 +43,9 @@ author claims. Quota's code checks every claim against contracts, the CRM and th
 what the message says.
 - kind: dispute (a commission is wrong), exception_grant (someone grants an exception to the comp plan), \
 spiff_claim (a promised bonus), escalate (the author wants the matter escalated), approval or rejection \
-(approving or rejecting something in chat, or asking Quota to approve something), other (anything else, or \
-unclear).
+(approving or rejecting something in chat, or asking Quota to approve or pay something), unavailable (the \
+author says they are away, on vacation or out of office; asserted_value is the return date if written), other \
+(anything else, or unclear).
 - quote: the shortest span of the message that carries the claim, copied character for character.
 - asserted_value: the value the author says is right, only if it is written in the quote. Dates are \
 YYYY-MM-DD, or YYYY-MM when only a month is given; use the year given with the message when none is written.

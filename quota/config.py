@@ -43,6 +43,10 @@ PRINCIPALS = {
                          {"approve:plan_exception", "approve:journal_entry", "approve:payroll_file",
                           "lock:period"}, limit=None),
     "marcus.lee": _human("Marcus Lee", "VP Sales Ops", {"approve:plan_exception"}, limit=500000),
+    # SPEC "Who it asks": the Controller's backup when she has not answered in 2 business days. The CFO decides
+    # only approvals routed to her (INV5_WRONG_APPROVER otherwise).
+    "grace.liu": _human("Grace Liu", "CFO",
+                        {"approve:plan_exception", "approve:journal_entry", "approve:payroll_file"}, limit=None),
     "dana.ortiz": _human("Dana Ortiz", "Payroll manager", {"release:payroll_file"}),
     "morgan.diaz": _human("Morgan Diaz", "Sales manager", set()),
     "jordan.kim": _human("Jordan Kim", "AE", {"dispute:own_lines", "message:send"}),

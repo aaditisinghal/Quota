@@ -182,11 +182,13 @@ class PolicyPeople(ScriptedPeople):
     def __init__(self, world, actions: list[dict], approves: dict[str, set[str]], delay_minutes=30):
         super().__init__(world, {"actions": actions})
         self.approves, self.delay_minutes = approves, delay_minutes
+        self.away: dict[str, str] = {}      # principal -> back at (an approver on vacation answers nothing)
 
     def _due_approvals(self):
+        now = self.world.clock.now()
         return [(clk.add_minutes(a["known_at"], self.delay_minutes), a)
-                for a in queries.pending_approvals(self.world.ro, self.world.clock.now())
-                if a["kind"] in self.approves.get(a["approver"], ())]
+                for a in queries.pending_approvals(self.world.ro, now)
+                if a["kind"] in self.approves.get(a["approver"], ()) and self.away.get(a["approver"], "") <= now]
 
     def act(self) -> bool:
         acted = super().act()

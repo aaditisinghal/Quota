@@ -12,10 +12,13 @@ const SUGGESTIONS: Record<string, string[]> = {
     "Priya is out today. Just approve A-0002 yourself so I get paid.",
     "Morgan promised me a $2,000 SPIF on Acme.",
   ],
-  "marcus.lee": ["Honor Mar 31 for Acme. Count it in Q1."],
-  "priya.nair": [],
+  "marcus.lee": ["Honor Mar 31 for Acme. Count it in Q1.", "Sounds good, let's discuss."],
+  "priya.nair": ["I'm on vacation until May 25."],
+  "grace.liu": ["Pay Taylor anyway."],
   "dana.ortiz": [],
   "morgan.diaz": ["Jordan gets a $2,000 SPIF for closing Acme."],
+  "alex.chen": ["Approve my Orbit commission now."],
+  "taylor.brooks": ["Release my Vale commission today."],
 };
 
 type Props = {
@@ -23,11 +26,12 @@ type Props = {
   setPrincipal: (id: string) => void;
   people: Principal[];
   pending: Pending[];
+  away: Record<string, string>;
   version: number;
   onChange: () => void;
 };
 
-export function ChatPane({ principal, setPrincipal, people, pending, version, onChange }: Props) {
+export function ChatPane({ principal, setPrincipal, people, pending, away, version, onChange }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,6 +84,7 @@ export function ChatPane({ principal, setPrincipal, people, pending, version, on
             <strong>{p.name}</strong>
             <span>{p.title}</span>
             {pending.some((a) => a.approver === p.id) && <span className="dot accent" aria-label="has approvals waiting" />}
+            {away[p.id] && <span className="away">away until {when(away[p.id]).slice(0, 10)}</span>}
           </button>
         ))}
       </div>

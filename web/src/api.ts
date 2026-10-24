@@ -26,6 +26,7 @@ export type WorldState = {
   principals: Principal[];
   pending_approvals: Pending[];
   upcoming: { at: string; type: string; payload: Record<string, unknown> }[];
+  away: Record<string, string>; // principal -> back at (an approver on vacation answers nothing)
 };
 
 export type TimelineItem = {
