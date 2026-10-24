@@ -5,3 +5,4 @@ __pycache__/
 build/
 *.db
 .claude/settings.local.json
+.llm_cache/
