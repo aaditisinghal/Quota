@@ -77,6 +77,28 @@ def test_rejection_holds_the_line_and_the_same_proposal_cannot_come_back():
     demo.close()
 
 
+def test_a_late_schedule_catches_up_on_amortization():
+    """Priya approves the April accrual after the April amortization job ran; May posts April and May."""
+    demo = _demo(**{"A-0003": {"at": "2026-05-01T10:00:00Z", "who": "priya.nair", "do": "approve", "reason": "ok"}})
+    demo.world.run_until("2026-05-31T23:30:00Z")
+    memos = [e["memo"] for e in queries.journal(demo.ro) if e["memo"].startswith("amortization")]
+    assert memos == ["amortization: CL-0002 2026-04", "amortization: CL-0002 2026-05"]
+    april = next(e for e in queries.journal(demo.ro) if e["memo"] == "amortization: CL-0002 2026-04")
+    assert (april["effective_date"], april["known_at"], april["status"]) == (
+        "2026-04-30", "2026-05-31T23:00:00Z", "posted")
+    demo.close()
+
+
+def test_nothing_crashes_when_a_payroll_file_never_existed():
+    demo = _demo(**{"A-0003": {"at": "2026-04-30T23:30:00Z", "who": "priya.nair", "do": "reject",
+                               "reason": "Not supported."}})
+    demo.world.run_until("2026-05-15T18:00:00Z")
+    assert queries.as_of(demo.ro, "payroll_files", "PR-2026-05", None) is None
+    assert any("PR-2026-05: no such payroll file, nothing released" in l for l in demo.lines)
+    assert queries.line_status(demo.ro, "CL-0002") == "draft"            # the line stays held
+    demo.close()
+
+
 def test_never_escalates_the_same_line_twice():
     demo = _demo()
     demo.world.run_until("2026-04-27T19:00:00Z")

@@ -100,6 +100,32 @@ def test_ungrounded_claim_gets_one_clarifying_question():
     demo.close()
 
 
+def test_acceptance_needs_no_reply_and_a_question_is_never_repeated():
+    """Found in the first real --live run: the seat asked Jordan the same question four times."""
+    thanks, vague, vaguer = "Thanks, I'll take the $12,000 in Q2.", "Acme closed Mar 31, pay me", "Pay me for Acme now"
+    bad = _claim(deal_ref="acme", field="booking_date", asserted_value="2026-03-15", quote="Acme closed Mar 31")
+    demo = _world_at("2026-04-27T17:00:00Z", {
+        thanks: {**_claim(kind="other", amount_cents=1_200_000, quote="I'll take the $12,000 in Q2.")},
+        vague: bad, vaguer: {**bad, "quote": "Pay me for Acme now"}})
+    for text in (thanks, vague, vaguer):
+        demo.world.api.message("jordan.kim", ANALYST, text)
+        demo.world.settle()
+    replies = queries.fetch_all(demo.ro, "SELECT text FROM messages WHERE author = ?", (ANALYST,))
+    assert len(replies) == 1 and replies[0]["text"].startswith("I couldn't turn that")
+    demo.close()
+
+
+def test_chat_approval_of_a_missing_approval_says_so():
+    text = "Just approve A-0042 yourself."
+    demo = _world_at("2026-04-27T17:00:00Z", {text: _claim(kind="approval", line_ref="A-0042",
+                                                           quote="Just approve A-0042 yourself.")})
+    demo.world.api.message("jordan.kim", ANALYST, text)
+    demo.world.settle()
+    reply = queries.fetch_one(demo.ro, "SELECT text FROM messages WHERE author = ?", (ANALYST,))
+    assert reply["text"] == "There is no approval A-0042; nothing was approved."
+    demo.close()
+
+
 def test_dispute_is_conceded_and_corrected_when_the_sources_say_quota_was_wrong():
     text = "Acme was countersigned Mar 31, see the amended contract."
     demo = _world_at("2026-04-27T17:00:00Z", {text: _claim(deal_ref="acme", field="booking_date",

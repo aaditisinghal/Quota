@@ -89,12 +89,26 @@ class PeopleAPI:
             "result": out["result"], "next_approval_id": out["next_approval_id"]})
         return out
 
+    def _refused(self, who, action, subject, refused: Refused) -> None:
+        self.world.emit(who, "REFUSED", f"{refused.refusal_id} {action} {subject}: {', '.join(refused.reason_codes)}")
+
     def lock_period(self, who, period) -> None:
-        self.wp.lock_period(who, period)
+        try:
+            self.wp.lock_period(who, period)
+        except Refused as refused:
+            self._refused(who, "lock_period", period, refused)
+            return
         self.world.emit(who, "PERIOD", f"{period} locked")
 
-    def release_payroll(self, who, file_id) -> str:
-        je_id = self.wp.release_payroll(who, file_id)
+    def release_payroll(self, who, file_id) -> str | None:
+        if self._get("payroll_files", file_id) is None:
+            self.world.emit(who, "PAYROLL", f"{file_id}: no such payroll file, nothing released")
+            return None
+        try:
+            je_id = self.wp.release_payroll(who, file_id)
+        except Refused as refused:
+            self._refused(who, "release_payroll", file_id, refused)
+            return None
         self.world.emit(who, "PAYROLL", f"{file_id} released")
         self.world.emit(who, "ENTRY", f"{je_id} posted payroll_payment {file_id}: "
                                       f"{entry_text(queries.lines_for(self.world.ro, je_id))}")
@@ -179,7 +193,10 @@ class LivePeople(ScriptedPeople):
         return [item for item in items if item[0] not in self.answered]
 
     def respond_at(self, item_id, row) -> str:
-        return self.scripted_at.get(item_id) or clk.add_minutes(row["known_at"], self.delay_minutes)
+        scripted = self.scripted_at.get(item_id)
+        if scripted and scripted >= row["known_at"]:   # the same id may name a different item in a live run
+            return scripted
+        return clk.add_minutes(row["known_at"], self.delay_minutes)
 
     def act(self) -> bool:
         acted = super().act()
@@ -197,16 +214,50 @@ class LivePeople(ScriptedPeople):
                  if t and t > now]
         return min(times) if times else None
 
+    def _line_evidence(self, line_id) -> str | None:
+        ro = self.world.ro
+        line = queries.as_of(ro, "commission_lines", line_id, None)
+        if line is None:
+            return None
+        origin = queries.as_of(ro, "decisions", line["decision_id"], None)
+        return (f"Commission line {line['id']}: {fmt_usd(line['amount_cents'])} for {line['deal_id']}/{line['rep_id']} "
+                f"in {line['booking_quarter']}, calculated in {origin['id']}: {origin['explanation']}")
+
+    def evidence(self, approval) -> list[str]:
+        """What a person sees when they open the approval: the subject and the reasoning behind it."""
+        ro, subject = self.world.ro, approval["subject_id"]
+        out = []
+        entry = queries.as_of(ro, "journal_entries", subject, None)
+        if entry:
+            out.append(f"Entry {subject} dated {entry['effective_date']}: {entry['memo']}; "
+                       f"{entry_text(queries.lines_for(ro, subject))}.")
+            decision = queries.as_of(ro, "decisions", entry["decision_id"], None) if entry["decision_id"] else None
+            if decision:
+                out.append(f"Why ({decision['id']}): {decision['explanation']}")
+                out.append(self._line_evidence(decision["subject_id"]) or "")
+        payroll = queries.as_of(ro, "payroll_files", subject, None)
+        if payroll:
+            out.append(f"Payroll file {subject}, total {fmt_usd(payroll['total_cents'])}:")
+            out += [self._line_evidence(pl["line_id"]) or pl["line_id"] for pl in json.loads(payroll["lines_json"])]
+        message = queries.as_of(ro, "messages", subject, None)
+        if message:
+            out.append(f"{config.display_name(message['author'])} wrote ({message['id']}): \"{message['text']}\"")
+        parent = approval["parent_id"]
+        while parent:
+            decided = queries.approval_decision(ro, parent)
+            if decided:
+                out.append(f"{parent} was {decided['decision']} by {config.display_name(decided['decided_by'])} "
+                           f"({decided['result']}): {decided['reason']}")
+            parent = queries.as_of(ro, "approvals", parent, None)["parent_id"]
+        return [line for line in out if line]
+
     def situation(self, item_id, who, row) -> str:
         ro = self.world.ro
         if item_id.startswith("A-"):
-            subject = row["subject_id"]
-            detail = queries.as_of(ro, "messages", subject, None) or queries.as_of(ro, "journal_entries", subject, None) \
-                or queries.as_of(ro, "payroll_files", subject, None) or {}
-            context = detail.get("text") or detail.get("memo") or detail.get("lines_json") or ""
             limit = routing.limit(who, row["kind"])
-            return (f"Approval request {item_id} for you: {row['kind']} on {subject}, amount "
-                    f"{fmt_usd(row['amount_cents'])}, requested by {row['requested_by']}. Context: {context}\n"
+            evidence = "\n".join(f"- {line}" for line in self.evidence(row))
+            return (f"Approval request {item_id} for you: {row['kind']} on {row['subject_id']}, amount "
+                    f"{fmt_usd(row['amount_cents'])}, requested by {row['requested_by']}.\nEvidence:\n{evidence}\n"
                     f"Your approval limit: {'none' if limit is None else fmt_usd(limit)}.")
         thread = [m for m in queries.fetch_all(ro, "SELECT * FROM messages WHERE known_at <= ? ORDER BY id",
                                                (self.world.clock.now(),))

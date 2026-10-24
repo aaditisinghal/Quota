@@ -131,19 +131,19 @@ class DeferredAccountant(Seat):
     # ---------- job.due amortization ----------
 
     def reconcile_amortization(self, ctx):
+        """Every schedule month up to this period not yet posted (a schedule that started late catches up)."""
         period = ctx.event.payload["period"]
         posted_memos = {e["memo"] for e in queries.fetch_all(self.ro, "SELECT memo FROM journal_entries")}
         due = []
         for schedule in self.active_schedules():
-            amount = amortization.amount_for(json.loads(schedule["schedule_json"]), period)
-            entry = entries.amortization_entry(schedule["line_id"], amount, clk.period_end(period))
-            if amount > 0 and entry["memo"] not in posted_memos:
-                due.append((schedule, entry))
+            for month, amount in json.loads(schedule["schedule_json"]):
+                entry = entries.amortization_entry(schedule["line_id"], amount, clk.period_end(month))
+                if month <= period and amount > 0 and entry["memo"] not in posted_memos:
+                    due.append((schedule, month, entry))
         return due
 
     def write_amortization(self, ctx):
-        period = ctx.event.payload["period"]
-        for schedule, entry in ctx.res:
+        for schedule, period, entry in ctx.res:
             accrual = self.decisions(kind="commission_accrual", subject_id=schedule["line_id"])[-1]
             je_id = self.draft(entry, accrual["id"])
             self.wp.post_entry(self.principal, je_id)

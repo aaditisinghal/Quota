@@ -24,6 +24,7 @@ CLAIM_ROUTES = {"dispute": "dispute", "escalate": "dispute", "exception_grant": 
 JOB_ROUTES = {"commission_run": "commission_run", "payroll_file": "payroll_file", "churn_review": "clawback_lines",
               "approver_digest": "digest", "approval_followup": "followup"}
 DISPUTE_OUTCOMES = {"held": "held", "conceded": "conceded", "escalation_offered": "escalated"}
+CLARIFY_PREFIX = "I couldn't turn that into something I can check"
 
 
 def alt_text(d) -> str:
@@ -166,7 +167,10 @@ class CommissionsAnalyst(Seat):
     def extract_message(self, ctx):
         message = ctx.data["message"]
         claim = extract_claim(self.extractor, message["text"], message["author"], self.now[:4], ctx.data["deals"])
-        ctx.route = CLAIM_ROUTES.get(claim.kind, "clarify")
+        if claim.kind == "other" and claim.problem is None:
+            ctx.route = "noted"          # thanks, acceptance, chit-chat: nothing to check, nothing to say
+        else:
+            ctx.route = CLAIM_ROUTES.get(claim.kind, "clarify")
         return claim
 
     # dispute / escalate
@@ -339,10 +343,19 @@ class CommissionsAnalyst(Seat):
 
     def reconcile_chat_approval(self, ctx):
         ref = (ctx.facts.line_ref or "").upper()
-        approval = self.get("approvals", ref) if ref.startswith("A-") else None
-        if approval is None:
+        if not ref.startswith("A-"):
             ctx.route = "clarify"
+            return None
+        approval = self.get("approvals", ref)
+        if approval is None:
+            ctx.route = "no_such_approval"
+            ctx.data["ref"] = ref
         return approval
+
+    def write_no_such_approval(self, ctx):
+        self.send(ctx.data["message"]["author"], f"There is no approval {ctx.data['ref']}; nothing was approved.",
+                  "REPLY")
+        return []
 
     def write_chat_approval(self, ctx):
         claim, message, approval = ctx.facts, ctx.data["message"], ctx.res
@@ -359,13 +372,17 @@ class CommissionsAnalyst(Seat):
                                          f"({config.title(approver)}), who decides it in the approval queue.", "REPLY")
         return []
 
-    # anything that did not survive extraction: one clarifying question
+    # anything that did not survive extraction: one clarifying question, never the same one twice in a row
 
     def write_clarify(self, ctx):
         claim, message = ctx.facts, ctx.data["message"]
+        sent = queries.fetch_all(self.ro, "SELECT text FROM messages WHERE author = ? AND to_principal = ? "
+                                          "AND known_at <= ? ORDER BY id", (self.principal, message["author"], self.now))
+        if sent and sent[-1]["text"].startswith(CLARIFY_PREFIX):
+            return []                    # already asked and not yet answered with something checkable
         reason = f" ({claim.problem})" if claim.problem else ""
-        self.send(message["author"], f"I couldn't turn that into something I can check{reason}. Which deal or "
-                                     f"commission line do you mean, and what do you think the right value is?", "REPLY")
+        self.send(message["author"], f"{CLARIFY_PREFIX}{reason}. Which deal or commission line do you mean, and what "
+                                     f"do you think the right value is?", "REPLY")
         return []
 
     # ---------- approval.decided on a plan exception ----------

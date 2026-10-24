@@ -72,6 +72,47 @@ def test_live_demo_completes_with_model_played_people(tmp_path):
         rerun.close()
 
 
+def test_live_run_completes_when_people_decline_everything(tmp_path):
+    """Found in the first real --live run: Jordan accepted, Priya rejected the accrual, and Dana's scripted
+    release of a payroll file that never existed crashed the run."""
+    class Declines(FakeModel):
+        def __call__(self, model, system, prompt, schema, effort):
+            if schema == PERSONA_SCHEMA:
+                if prompt.startswith("Approval request"):
+                    return json.dumps({"action": "reject", "reason": "Not convinced.", "text": ""})
+                if "You are Jordan Kim" in system:
+                    return json.dumps({"action": "message", "reason": "", "text": "Thanks, I accept the ruling."})
+            return super().__call__(model, system, prompt, schema, effort)
+
+    demo = demo_acme.run(out=lambda line: None, mode="live", llm=LLM(cache_dir=tmp_path, transport=Declines()))
+    try:
+        assert demo.results["chain"][0] and not any(demo.results["invariants"].values())
+        assert all(demo.results["replays"].values())
+        assert "  (no posted refund and clawback for acme; nothing to cascade)" in demo.lines
+        jordan_got = queries.fetch_all(demo.ro, "SELECT text FROM messages WHERE to_principal = 'jordan.kim'")
+        assert sum(m["text"].startswith("I couldn't turn that") for m in jordan_got) <= 1
+    finally:
+        demo.close()
+
+
+def test_approval_requests_show_their_evidence(tmp_path):
+    seen = []
+
+    class Records(FakeModel):
+        def __call__(self, model, system, prompt, schema, effort):
+            if schema == PERSONA_SCHEMA and prompt.startswith("Approval request"):
+                seen.append(prompt)
+            return super().__call__(model, system, prompt, schema, effort)
+
+    demo = demo_acme.run(out=lambda line: None, mode="live", llm=LLM(cache_dir=tmp_path, transport=Records()))
+    demo.close()
+    accrual = next(p for p in seen if "journal_entry on JE-0004" in p)
+    assert "Why (D-" in accrual and "Commission line CL-0002: $18,000.00" in accrual and "R-BOOKING-01" in accrual
+    routed = next(p for p in seen if "plan_exception" in p and "priya" not in p.split("\n")[0] and
+                  "was approved by Marcus Lee (over_limit_routed)" in p)
+    assert "Honor Mar 31 for Acme" in routed
+
+
 def test_live_people_cannot_exceed_their_capabilities(tmp_path):
     class Overreach(FakeModel):
         def __call__(self, model, system, prompt, schema, effort):
