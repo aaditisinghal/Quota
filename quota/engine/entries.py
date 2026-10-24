@@ -129,6 +129,7 @@ def clawback_decision(rows, line_id, now) -> dict:
         "args": {"line_id": line_id, "total_cents": line["amount_cents"], "amortized_cents": amortized,
                  "date": churn_date, "recoverable": recoverable, "booking_date": booking_date,
                  "churn_date": churn_date, "trigger": trigger, "window_end": window_end,
+                 "window_months": plan.clawback_window_months,
                  "plan": {"id": plan.plan_id, "version": plan.version, "signed_at": plan.signed_at}},
         "result": entry,
     }

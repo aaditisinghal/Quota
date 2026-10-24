@@ -166,6 +166,69 @@ def standing_precedent(conn, kind, t) -> str | None:
     return None
 
 
+# ---------- gathering decision inputs ----------
+
+def commission_rows(conn, rep_id, t) -> dict[str, list[dict]]:
+    """Everything the calculator reads for one rep, as known at t."""
+    deals = [as_of(conn, "deals", deal_id, t) for deal_id in ids(conn, "deals", t)]
+    mine = [d for d in deals if d["owner_id"] == rep_id
+            or any(s["rep"] == rep_id for s in json.loads(d["splits_json"]))]
+    deal_ids = [d["id"] for d in mine]
+    contracts = []
+    for deal_id in deal_ids:
+        found = fetch_one(conn, "SELECT id FROM contracts WHERE deal_id = ? AND known_at <= ? "
+                                "ORDER BY version DESC LIMIT 1", (deal_id, t))
+        if found:
+            contracts.append(as_of(conn, "contracts", found["id"], t))
+    marks = ", ".join("?" * len(deal_ids))
+    esign = fetch_all(conn, f"SELECT * FROM esign_events WHERE deal_id IN ({marks}) AND known_at <= ? ORDER BY id",
+                      (*deal_ids, t)) if deal_ids else []
+    plans = [as_of(conn, "plans", plan_id, t) for plan_id in
+             [r["id"] for r in fetch_all(conn, "SELECT DISTINCT id FROM plans WHERE rep_id = ? AND known_at <= ?",
+                                         (rep_id, t))]]
+    precedents = [p for p in precedents_in_force(conn, t) if loads(p["scope_json"]).get("deal_id") in deal_ids]
+    return {"plans": plans, "deals": mine, "contracts": contracts, "esign_events": esign, "precedents": precedents}
+
+
+def input_refs(rows: dict[str, list[dict]]) -> list[dict]:
+    return [input_ref(table, row) for table, table_rows in rows.items() for row in table_rows]
+
+
+# ---------- replay ----------
+
+def _recompute(fn, rows, decision) -> dict:
+    from quota.engine import calculator, disputes, entries
+    subject, now = decision["subject_id"], decision["known_at"]
+    if fn == "calc_commission":
+        deal_id, rep_id = subject.split("/")
+        return calculator.commission_decision(rows, deal_id, rep_id, now)["output"]
+    if fn == "commission_accrual_entry":
+        return entries.accrual_decision(rows, subject, now)["output"]
+    if fn == "clawback_entry":
+        return entries.clawback_decision(rows, subject, now)["output"]
+    if fn == "evaluate_dispute":
+        return disputes.dispute_decision(rows, subject, now)["output"]
+    raise ValueError(f"no replay for fn {fn!r}")
+
+
+def replay_decision(conn, decision_id) -> tuple[bool, dict, dict]:
+    """Load each input at its exact (table, id, version), verify sha256, re-run the engine function
+    named in output_json["fn"]. Returns (matches, stored_output, recomputed_output)."""
+    decision = as_of(conn, "decisions", decision_id, None)
+    if decision is None:
+        raise KeyError(f"unknown decision {decision_id}")
+    stored = json.loads(decision["output_json"])
+    rows: dict[str, list[dict]] = {}
+    for ref in json.loads(decision["inputs_json"]):
+        row = load_input(conn, ref)
+        if row is None or row_sha(row) != ref["sha256"]:
+            return False, stored, {"error": f"input {ref['table']}:{ref['id']} v{ref.get('version')} "
+                                            "is missing or altered"}
+        rows.setdefault(ref["table"], []).append(row)
+    recomputed = json.loads(json.dumps(_recompute(stored["fn"], rows, decision)))
+    return recomputed == stored, stored, recomputed
+
+
 def format_trial_balance(tb: dict[str, int], accounts: dict) -> list[str]:
     from quota.money import fmt_usd
     out = []

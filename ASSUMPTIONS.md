@@ -34,3 +34,15 @@ One line per choice made where IMPLEMENTATION.md was silent or ambiguous.
 - Step 3: the benefit period starts in the period the commission is accrued (2026-04 for CL-0002), not the booking date.
 - Step 3: the clawback trigger is the churn event's `reason` (fallback `churn`); the amortized amount is the schedule through the churn period.
 - Step 3: entry builders drop zero-amount lines (e.g. a clawback with nothing amortized yet).
+- Step 4: Q1 history deals (birch, cedar, delta) are facts only, with no journal entries, because they predate the demo ledger. Their deal and contract facts are known at their countersignature time.
+- Step 4: seed facts print as FACT/PERIOD lines, each at its own known_at, before step 1.
+- Step 4: monthly revenue is a `system:billing` source entry at ACV / 12 with source_ref `revenue:acme:YYYY-MM`; billing facts `acme-inv-1`, `acme-pay-1`, `acme-ref-1` back the invoice, payment and refund entries.
+- Step 4: right after approving A-0002 the Controller writes P-0001 (she holds `approve:plan_exception`); it expires at the plan's `effective_to` (2026-06-30).
+- Step 4: monthly amortization JEs cite D-0006 (the accrual decision that set AS-0001), since section 9 creates no decision per month.
+- Step 4: at step 13 the seat posts JE-0004 once A-0003 is final and the Controller marks CL-0002 approved; at step 23 she likewise approves CL-0003 so the receivable can net against a later payout.
+- Step 4: at step 22, CL-0002 moves to `clawed_back` and CL-0003 is the negative correcting line. seat:commissions_analyst writes it under D-0007, since the deferred accountant lacks `draft:commission_line`.
+- Step 4: the escalation decision D-0004 has kind `escalation` and outcome `escalated`.
+- Step 4: the step 24 report prints under a plain header (section 10 has no REPORT line kind). The cascade's line 8 keeps section 9's text `2026-Q1` verbatim.
+- Step 4: printed disagreements are de-duplicated when two sources carry the same alternative (contract and e-sign countersignature); the stored resolutions keep both.
+- Step 4: `demo --db PATH` refuses an existing file instead of overwriting it, since the ledger is append-only.
+- Step 4: account names print from config, so 6110 shows as "Commission expense, amortization".

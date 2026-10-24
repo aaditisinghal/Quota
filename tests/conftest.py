@@ -97,6 +97,15 @@ def ledger(wp, conn, clock):
     return builder
 
 
+@pytest.fixture(scope="session")
+def acme_demo():
+    """The full section 9 timeline, run once per session on its own in-memory DB."""
+    from quota.sim import demo_acme
+    demo = demo_acme.run(out=lambda line: None)
+    yield demo
+    demo.close()
+
+
 # ---------- engine fixtures (rows shaped exactly like DB rows) ----------
 
 @pytest.fixture
