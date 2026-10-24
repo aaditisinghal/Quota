@@ -44,6 +44,12 @@ TERMS, TERM_WEIGHTS = [12, 24, 36], [0.5, 0.3, 0.2]
 SPLIT_SHARE = 0.15
 SPLITS = [5000, 6000, 7000]
 APPROVES = {"priya.nair": {"journal_entry", "payroll_file", "plan_exception"}, "marcus.lee": {"plan_exception"}}
+# 40 planted cases, at least 2 of every type; rep-level and territory cases go first (they reserve whole books).
+PLANTS = [("E10", 2), ("E05", 2), ("E09", 2), ("E14", 2), ("E16", 2), ("E08", 3), ("E15", 2), ("E07", 3), ("E12", 3),
+          ("E03", 3), ("E04", 3), ("E02", 2), ("E11", 2), ("E01", 3), ("E06", 3), ("E13", 3)]
+NOTHING_BOOKED = {"E02", "E05", "E10"}           # expected amount 0: no line should exist
+RECOVERED = {"E08", "E15"}                        # expected amount 0: paid, then recovered in full
+NEVER_PAID = {"E02", "E05", "E07", "E10"}         # the most that may reach payroll is $0
 
 
 @dataclass
@@ -69,6 +75,7 @@ class Deal:
     paid_at: str | None
     tags: set = field(default_factory=set)      # planted case ids
     created_as: dict | None = None              # CRM fields at creation when a later edit changed them (E10)
+    amendment: dict | None = None               # {"acv_cents", "signed_at"} when an amendment raises ACV (E12)
 
 
 def _ts(day: date, minutes_after_nine: int = 0) -> str:
@@ -105,6 +112,7 @@ class Fernhill:
         self.extractions: dict[str, dict] = {}
         self.answer_key: list[dict] = []
         self.payroll_edits: dict[str, dict] = {}      # period -> a hand edit in Dana's export (E16)
+        self.plan_drafts: dict[str, dict] = {}         # rep -> unsigned plan version (E14)
         self.used_deals: set[str] = set()
         self.exclusive_reps: set[str] = set()         # reps whose whole book is one case
 
@@ -139,12 +147,12 @@ class Fernhill:
                 return slug, name
 
     def _make_deals(self) -> list[Deal]:
-        deals, used = [], set()
+        deals, self.accounts_used = [], set()
         for rep in self.reps:
             for q_start, q_end in self._quarters():
                 days = _business_days(q_start, q_end)
                 for _ in range(self.rng.randint(4, 8)):
-                    deals.append(self._deal(rep, self.rng.choice(days), used))
+                    deals.append(self._deal(rep, self.rng.choice(days), self.accounts_used))
         return sorted(deals, key=lambda d: (d.booked_at, d.id))
 
     def _deal(self, rep: Rep, day: date, used: set) -> Deal:
@@ -308,15 +316,22 @@ class Fernhill:
         return self.case("E09", case_deal, rep.id, "posted", ["priya.nair"], f"{rep.id} left {end} ({rep.state})",
                          scope="rep")
 
-    def plant_E10(self, moved=4, unchanged=2):
+    def plant_E10(self, moved=3, unchanged=2):
         """Territory move half done by the Sales Ops bot."""
-        def has_pipeline(rep):
-            return sum(d.owner == rep.id and len(d.splits) == 1 and d.booked_at[:10] >= "2026-04-08"
-                       for d in self.deals) >= moved + unchanged
-        old = self.take_rep(has_pipeline)
+        def pipeline(rep):
+            return [d for d in self.deals if d.owner == rep.id and len(d.splits) == 1 and d.booked_at[:10] >= "2026-04-08"]
+        try:
+            old = self.take_rep(lambda r: len(pipeline(r)) >= moved + unchanged)
+        except ValueError:                      # nobody has enough Q2 pipeline: give a free rep more deals
+            old = self.take_rep()
+            days = _business_days(date(2026, 4, 8), date.fromisoformat(min(self.end, "2026-06-25")))
+            while len(pipeline(old)) < moved + unchanged:
+                deal = self._deal(old, self.rng.choice(days), self.accounts_used)
+                deal.splits = [{"rep": old.id, "bps": 10000}]
+                self.deals.append(deal)
+            self.deals.sort(key=lambda d: (d.booked_at, d.id))
         new = self.take_rep()
-        deals = sorted([d for d in self.deals if d.owner == old.id and len(d.splits) == 1
-                        and d.booked_at[:10] >= "2026-04-08"], key=lambda d: d.booked_at)[:moved + unchanged]
+        deals = sorted(pipeline(old), key=lambda d: d.booked_at)[:moved + unchanged]
         at = "2026-04-01T09:00:00Z"
         for deal in deals:
             deal.created_at = min(deal.created_at, "2026-03-10T09:00:00Z")
@@ -345,6 +360,7 @@ class Fernhill:
         deal = self.pick(lambda d: d.term > 12 and d.booked_at[:10] <= "2026-03-20")
         increase = round(deal.acv_cents * self.rng.uniform(0.2, 0.5) / 100_000) * 100_000
         at = f"2026-05-{self.rng.randint(12, 22):02d}T15:00:00Z"
+        deal.amendment = {"acv_cents": deal.acv_cents + increase, "signed_at": at}
         self.events.append((at, "contract.amended", {"deal_id": deal.id, "signed_at": at,
                                                      "terms": {"acv_cents": deal.acv_cents + increase,
                                                                "kind": "amendment"}}))
@@ -366,10 +382,11 @@ class Fernhill:
         mine = [d for d in self.deals if d.owner == rep.id and d.booked_at[:10] >= "2026-04-06" and len(d.splits) == 1]
         case_deal = max(mine, key=lambda d: d.booked_at)
         self.used_deals.add(case_deal.id)
-        self.events.append(("2026-04-03T10:00:00Z", "plan.amended", {
-            "rep_id": rep.id, "version": 4, "signed_at": "",
-            "changes": {"rates": [{"tier": "base", "up_to_attainment": 1.0, "rate": 0.10},
-                                  {"tier": "accelerator", "above_attainment": 1.0, "rate": 0.20}]}}))
+        changes = {"rates": [{"tier": "base", "up_to_attainment": 1.0, "rate": 0.10},
+                             {"tier": "accelerator", "above_attainment": 1.0, "rate": 0.20}]}
+        self.plan_drafts[rep.id] = {"version": 4, "changes": changes}
+        self.events.append(("2026-04-03T10:00:00Z", "plan.amended",
+                            {"rep_id": rep.id, "version": 4, "signed_at": "", "changes": changes}))
         return self.case("E14", case_deal, rep.id, "escalated", ["marcus.lee"], "unsigned v4 raises the accelerator",
                          scope="rep")
 
@@ -382,11 +399,70 @@ class Fernhill:
         return self.case("E15", deal, deal.owner, "corrected", ["priya.nair"], f"voided {at[:10]} after payout")
 
     def plant_E16(self):
-        """Payroll export differs from the approved lines by $340."""
-        deal = self.pick(self._in("2026-04-01", "2026-04-22"))
+        """Payroll export differs from the approved lines by $340 (May's release, then June's)."""
+        period = next(p for p in ("2026-05", "2026-06") if p not in self.payroll_edits)
+        booked_in = clk.add_periods(period, -1)
+        deal = self.pick(self._in(f"{booked_in}-01", f"{booked_in}-22"))
         deal.paid_at = _ts(date.fromisoformat(deal.invoice_at[:10]) + timedelta(days=10), 60)
-        self.payroll_edits["2026-05"] = {"deal_id": deal.id, "cents": 34_000}
-        return self.case("E16", deal, deal.owner, "blocked", ["dana.ortiz"], "May export +$340 on this line")
+        self.payroll_edits[period] = {"deal_id": deal.id, "cents": 34_000}
+        return self.case("E16", deal, deal.owner, "blocked", ["dana.ortiz"], f"{period} export +$340 on this line")
+
+    # ---------- the answer key ----------
+
+    def plant_all(self) -> list[dict]:
+        if len(self.reps) < 16:
+            raise ValueError("planting 40 cases needs at least 16 reps")
+        for error, count in PLANTS:
+            for _ in range(count):
+                getattr(self, f"plant_{error}")()
+        self.fill_expected()
+        return self.answer_key
+
+    def truth_rows(self, rep_id: str) -> dict:
+        """The facts as they truly end up (from the generator, not from Quota's ledger), shaped like DB rows."""
+        rows = {"deals": [], "contracts": [], "esign_events": [], "plans": [], "precedents": []}
+        for d in self.deals:
+            if rep_id not in self.deal_reps(d):
+                continue
+            rows["deals"].append({"id": d.id, "version": 1, "account": d.account, "crm_amount_cents": d.crm_amount_cents,
+                                  "crm_close_date": d.crm_close_date, "stage": "closed_won", "owner_id": d.owner,
+                                  "splits_json": json.dumps(d.splits), "known_at": d.booked_at, "source": "truth"})
+            contract = {"id": d.id, "version": 1, "deal_id": d.id, "acv_cents": d.acv_cents, "term_months": d.term,
+                        "contract_date": d.booked_at[:10], "countersigned_at": d.booked_at,
+                        "clauses_json": json.dumps({"billing": "annual_upfront"}), "doc_ref": "truth",
+                        "known_at": d.booked_at, "source": "truth"}
+            rows["contracts"].append(contract)
+            if d.amendment:
+                rows["contracts"].append({**contract, "version": 2, "acv_cents": d.amendment["acv_cents"],
+                                          "clauses_json": json.dumps({"billing": "annual_upfront", "amendment": {
+                                              "kind": "amendment", "signed_at": d.amendment["signed_at"]}})})
+            rows["esign_events"].append({"id": f"ENV-{d.id}-countersigned", "envelope_id": f"ENV-{d.id}",
+                                         "deal_id": d.id, "event": "countersigned", "at": d.booked_at,
+                                         "known_at": d.booked_at})
+        template = load_plan_raw(seed_acme.PLAN_PATH)
+        plan = {"id": f"AE-2026-H1-{rep_id}", "version": 3, "rep_id": rep_id, "effective_from": "2026-01-01",
+                "effective_to": "2026-06-30", "config_json": json.dumps({**template, "rep": rep_id}),
+                "signed_doc_ref": "truth", "signed_at": template["signed_at"], "known_at": "2025-12-18T17:00:00Z"}
+        rows["plans"].append(plan)
+        if rep_id in self.plan_drafts:
+            draft = self.plan_drafts[rep_id]
+            rows["plans"].append({**plan, "version": draft["version"], "signed_at": None,
+                                  "config_json": json.dumps({**template, "rep": rep_id, **draft["changes"]})})
+        return rows
+
+    def fill_expected(self) -> None:
+        from quota.engine.calculator import evaluate
+        end = f"{self.end}T23:59:59Z"
+        for case in self.answer_key:
+            if case["type"] in NOTHING_BOOKED:
+                earned = 0
+            else:
+                rows = self.truth_rows(case["rep_id"])
+                earned = evaluate(rows, case["deal_id"], case["rep_id"], end).amount_cents
+                if case["type"] == "E12":
+                    earned += evaluate(rows, case["amendment_key"], case["rep_id"], end).amount_cents
+            case["expected_amount_cents"] = 0 if case["type"] in RECOVERED else earned
+            case["max_payout_cents"] = 0 if case["type"] in NEVER_PAID else earned
 
     # ---------- events ----------
 
@@ -490,10 +566,13 @@ class Fernhill:
 
 
 def generate(seed: int, reps: int = 20, start: str = "2026-01-01", end: str = "2026-06-30", out_dir=None,
-             db_path=None, out=None) -> World:
+             db_path=None, out=None, plant: bool = True) -> World:
     """A seeded Fernhill World with its facts and events loaded, ready for `world.run_until(world.end_ts)`.
-    The answer key (empty until errors are planted) is written to out_dir/answer_key.json when out_dir is given."""
+    With `plant`, errors E01-E16 are planted (40 cases) and the answer key is written to out_dir/answer_key.json
+    when out_dir is given."""
     fernhill = Fernhill(seed, reps, start, end)
+    if plant:
+        fernhill.plant_all()
     world = fernhill.build(db_path, out)
     if out_dir is not None:
         Path(out_dir).mkdir(parents=True, exist_ok=True)

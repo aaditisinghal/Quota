@@ -40,7 +40,7 @@ def test_world_shape_matches_section_13():
 
 @pytest.fixture(scope="module")
 def small_world():
-    world = generate(11, reps=4)
+    world = generate(11, reps=4, plant=False)
     world.run_until("2026-02-15T12:00:00Z")
     mid = {"now": world.clock.now(), "deals": queries.latest_rows(world.ro, "deals", world.clock.now())}
     world.run_until(world.end_ts)

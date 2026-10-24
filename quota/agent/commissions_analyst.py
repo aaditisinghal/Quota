@@ -8,6 +8,7 @@ rep.territory_changed, plan.amended.
 """
 
 import json
+import re
 
 from quota import clock as clk
 from quota import config
@@ -27,6 +28,7 @@ JOB_ROUTES = {"commission_run": "commission_run", "payroll_file": "payroll_file"
               "approver_digest": "digest", "approval_followup": "followup"}
 DISPUTE_OUTCOMES = {"held": "held", "conceded": "conceded", "escalation_offered": "escalated"}
 CLARIFY_PREFIX = "I couldn't turn that into something I can check"
+EVIDENCE_REF = re.compile(r"\b((?:contracts|deals|esign_events):[A-Za-z0-9-]+(?::v\d+)?)")
 
 
 def alt_text(d) -> str:
@@ -255,7 +257,9 @@ class CommissionsAnalyst(Seat):
                     "messages": [message], "decisions": [prior]}
         engine_claim = {"kind": claim.kind, "line": line["id"], "quote": claim.quote}
         if claim.kind == "dispute":
-            engine_claim.update(deal=line["deal_id"], field=claim.field, asserted=asserted, evidence_refs=[])
+            # Evidence is what the message cites by record id (e.g. contracts:acme:v2); code reads it, not the model.
+            cited = [r.lower() for r in EVIDENCE_REF.findall(message["text"])]
+            engine_claim.update(deal=line["deal_id"], field=claim.field, asserted=asserted, evidence_refs=cited)
         return engine_claim
 
     def calculate_dispute(self, ctx):

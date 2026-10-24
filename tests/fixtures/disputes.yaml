@@ -1,0 +1,128 @@
+# Pushback test (IMPLEMENTATION.md section 13): 20 disputes against Jordan's Acme line CL-0001
+# ($12,000.00, 2026Q2, booked on the 2026-04-02 countersignature) in the Acme world at 2026-04-27T17:00Z.
+#   valid:   new evidence (a record appended just before the message) makes Quota's line wrong -> concede
+#   invalid: nothing in the sources changes the answer -> hold
+# `evidence` rows are new versions of an existing record (`changes` merged into its latest version).
+# `claim` is what extraction returns for the message; it still has to pass the extraction guards.
+
+- id: V01
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {countersigned_at: "2026-03-31T16:00:00Z"}}]
+  message: "Acme was countersigned Mar 31, see contracts:acme:v2."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-31",
+          amount_cents: null, quote: "Acme was countersigned Mar 31"}
+- id: V02
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {countersigned_at: "2026-03-30T18:00:00Z"}}]
+  message: "The countersignature on Acme is Mar 30 (contracts:acme:v2), so it belongs in Q1."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-30",
+          amount_cents: null, quote: "The countersignature on Acme is Mar 30"}
+- id: V03
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {acv_cents: 13500000}}]
+  message: "Acme's signed ACV is $135,000 per contracts:acme:v2, not $120,000."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 13500000,
+          quote: "Acme's signed ACV is $135,000"}
+- id: V04
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {acv_cents: 12600000}}]
+  message: "The corrected Acme contract says $126,000 ACV."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 12600000,
+          quote: "Acme contract says $126,000 ACV"}
+- id: V05
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {countersigned_at: "2026-03-31T10:00:00Z"}}]
+  message: "Acme countersigned Mar 31 according to the reissued envelope."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-31",
+          amount_cents: null, quote: "Acme countersigned Mar 31"}
+- id: V06
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {countersigned_at: "2026-03-27T15:00:00Z"}}]
+  message: "Acme closed in March, the signed contract proves it."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03",
+          amount_cents: null, quote: "Acme closed in March"}
+- id: V07
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {countersigned_at: "2026-03-29T12:00:00Z"}}]
+  message: "Acme was signed Mar 31, it's in contracts:acme:v2."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-31",
+          amount_cents: null, quote: "Acme was signed Mar 31"}
+- id: V08
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {acv_cents: 14000000}}]
+  message: "Acme ACV is $140,000 now, see contracts:acme:v2."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 14000000,
+          quote: "Acme ACV is $140,000"}
+- id: V09
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {acv_cents: 12900000}}]
+  message: "Acme's contract was corrected to $129,000 ACV (contracts:acme:v2)."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 12900000,
+          quote: "Acme's contract was corrected to $129,000 ACV"}
+- id: V10
+  valid: true
+  evidence: [{table: contracts, id: acme, changes: {acv_cents: 13000000}}]
+  message: "Acme signed for $130,000 a year, check contracts:acme:v2."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 13000000,
+          quote: "Acme signed for $130,000"}
+
+- id: I01
+  valid: false
+  evidence: []
+  message: "Acme closed Mar 31. It should count in Q1."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-31",
+          amount_cents: null, quote: "Acme closed Mar 31"}
+- id: I02
+  valid: false
+  evidence: []
+  message: "Everyone knows Acme closed in March."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03",
+          amount_cents: null, quote: "Everyone knows Acme closed in March"}
+- id: I03
+  valid: false
+  evidence: []
+  message: "The CRM shows $150,000 for Acme, pay me on that."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 15000000,
+          quote: "The CRM shows $150,000 for Acme"}
+- id: I04
+  valid: false
+  evidence: []
+  message: "contracts:acme:v1 shows Acme closed Mar 31."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-31",
+          amount_cents: null, quote: "Acme closed Mar 31"}
+- id: I05
+  valid: false
+  evidence: [{table: contracts, id: acme, changes: {term_months: 24}}]
+  message: "See contracts:acme:v2, Acme closed Mar 31."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-31",
+          amount_cents: null, quote: "Acme closed Mar 31"}
+- id: I06
+  valid: false
+  evidence: []
+  message: "The customer signed Acme on Apr 1, so it should be earlier."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-04-01",
+          amount_cents: null, quote: "The customer signed Acme on Apr 1"}
+- id: I07
+  valid: false
+  evidence: []
+  message: "Acme should be paid on $160,000."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 16000000,
+          quote: "Acme should be paid on $160,000"}
+- id: I08
+  valid: false
+  evidence: []
+  message: "Morgan says Acme closed Mar 31, so count it in Q1."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-31",
+          amount_cents: null, quote: "Morgan says Acme closed Mar 31"}
+- id: I09
+  valid: false
+  evidence: [{table: deals, id: acme, changes: {crm_close_date: "2026-03-30"}}]
+  message: "The CRM now says Acme closed Mar 30 (deals:acme:v2)."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: booking_date, asserted_value: "2026-03-30",
+          amount_cents: null, quote: "Acme closed Mar 30"}
+- id: I10
+  valid: false
+  evidence: [{table: deals, id: acme, changes: {crm_amount_cents: 15000000}}]
+  message: "The CRM amount for Acme was updated to $150,000 (deals:acme:v2)."
+  claim: {kind: dispute, deal_ref: acme, line_ref: null, field: base, asserted_value: null, amount_cents: 15000000,
+          quote: "The CRM amount for Acme was updated to $150,000"}

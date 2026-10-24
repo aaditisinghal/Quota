@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from contextlib import closing
+from pathlib import Path
 
 from quota import config
 from quota.ledger import db, hashing, invariants, queries
@@ -64,6 +65,16 @@ def cmd_tb(args) -> int:
     return 0
 
 
+def cmd_eval(args) -> int:
+    from quota import eval as evaluation
+    out_dir = Path(args.out) / f"seed-{args.seed}"
+    card = evaluation.run_eval(args.seed, reps=args.reps, out_dir=out_dir)
+    for line in evaluation.format_scorecard(card):
+        print(line)
+    print(f"\nAnswer key and scorecard written to {out_dir}")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m quota")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -91,6 +102,12 @@ def main(argv=None) -> int:
     tb.add_argument("--db", required=True)
     tb.add_argument("--as-of", dest="as_of")
     tb.set_defaults(fn=cmd_tb)
+
+    evaluate = sub.add_parser("eval", help="run Fernhill for a seed and score Quota against the answer key")
+    evaluate.add_argument("--seed", type=int, required=True)
+    evaluate.add_argument("--reps", type=int, default=20)
+    evaluate.add_argument("--out", default="runs", help="directory for answer_key.json and scorecard.json")
+    evaluate.set_defaults(fn=cmd_eval)
 
     args = parser.parse_args(argv)
     return args.fn(args)
