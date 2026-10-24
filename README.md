@@ -63,10 +63,19 @@ column.
 - Seed 1729 was chosen by the builder, not hidden by a teammate.
 - Straight-through counts lines approved or paid with no hold, escalation or dispute; the Controller's routine
   approval of accrual and payroll batches is not counted as a human touch.
-- Not built yet: the SEC 10-K policy citations (SEC EDGAR refuses automated reads without a declared contact),
-  manager overrides and the 1350/1450 current vs noncurrent split (both on SPEC's cut list), and turning repeated
-  precedents into proposed plan changes. The "attack your own controls" exercise is below, run as tests rather
-  than by a separate agent.
+- Not built: manager overrides and the 1350/1450 current vs noncurrent split (both on SPEC's cut list). The
+  "attack your own controls" exercise is below, run as tests rather than by a separate agent.
+
+## Policy anchored in public filings
+
+Fernhill's capitalization policy follows what public SaaS companies disclose in their 10-K notes (read from SEC
+EDGAR; paraphrased):
+
+| Filing | What it discloses | Where Fernhill follows it |
+| --- | --- | --- |
+| [Snowflake 10-K, fiscal 2025](https://www.sec.gov/Archives/edgar/data/1640147/000164014725000052/snow-20250131.htm) | Commissions on new or expanded contracts that are commensurate with renewal commissions are capitalized and amortized over the contracts' weighted-average term; those that are not commensurate, over a five-year benefit period | Fernhill's renewal commissions are commensurate, so the benefit period is the contract term (Acme: 36 x $500) |
+| [Amplitude 10-K, fiscal 2024](https://www.sec.gov/Archives/edgar/data/1866692/000095017025024135/ampl-20241231.htm) | Initial-contract commissions amortized straight-line over five years because renewal commissions are not commensurate; the next 12 months' amortization is shown as current, the rest noncurrent | The alternative when renewals are not commensurate; SPEC's 1350 (current) / 1450 (noncurrent) split comes from the same practice (cut here) |
+| [DocuSign 10-K, fiscal 2024](https://www.sec.gov/Archives/edgar/data/1261333/000126133324000045/docu-20240131.htm) | Incremental sales commissions capitalized and amortized straight-line over the period of benefit, five years for initial contracts, since renewal commissions are not commensurate | Capitalize only commissions incremental to winning a contract; straight-line amortization |
 
 ## Screens
 
@@ -136,6 +145,7 @@ What broke, and is now fixed with a regression test (`tests/test_spec_pressure.p
 
 | A clawback receivable sat in 1290 forever | The next payroll nets it against the rep's new commission (Dr 2150 / Cr 1290 / Cr 1000 net), oldest recovery first; what new commission cannot cover stays in 1290 and Payroll is told |
 | The eight-number churn cascade existed only in the CLI | Ledger health shows it for every churned deal, each figure linked to its trace |
+| Approved exceptions never taught the system anything | The same kind of exception approved on two or more deals becomes a `plan_change_proposal` to the VP Sales Ops with the pattern found (e.g. "countersignature follows within 4 days"); nothing changes until a signed plan amendment |
 | Materiality ($500 / 2%) was configured but unused | A commission decision whose sources disagree by more than that says so in its explanation; the source ranking still settles it (E01: asks nobody) |
 
 Verified beyond the tests: `serve --live` against Claude Opus 5.5 (free-form chat read correctly, the model

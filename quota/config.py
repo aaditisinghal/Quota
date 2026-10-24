@@ -64,6 +64,7 @@ DIGEST_TIME = "09:00:00Z"          # one daily digest per approver
 ESCALATE_AFTER_BUSINESS_DAYS = 2   # then routing.ESCALATION backup; never auto-approve
 PAYROLL_DAY = 15                   # payroll for period YYYY-MM releases on YYYY-MM-15
 PAYROLL_BLOCKING_DAYS = 2          # approvals blocking a payroll this close go out immediately
+PROPOSE_PLAN_CHANGE_AFTER = 2      # the same kind of exception on this many deals -> propose a signed plan change
 
 
 def principals(with_seed: bool = False) -> dict:

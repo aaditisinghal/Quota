@@ -102,5 +102,32 @@ def check_plan_drift(rows, rep_id, version) -> dict:
                        "signed_version": signed[-1]["version"] if signed else None, "changed": changed}}
 
 
+def _days_between(earlier: str, later: str) -> int:
+    from datetime import date
+    return (date.fromisoformat(later[:10]) - date.fromisoformat(earlier[:10])).days
+
+
+def check_precedent_pattern(rows, field, threshold) -> dict:
+    """SPEC "How does it learn?": approved exceptions are scoped precedents. When the same kind of exception has
+    been approved on `threshold` or more deals, propose a plan change for Sales Ops to sign; never a silent rule."""
+    precedents = sorted((p for p in rows.get("precedents", []) if _loads(p["scope_json"]).get("field") == field),
+                        key=lambda p: p["id"])
+    deals = sorted({_loads(p["scope_json"])["deal_id"] for p in precedents})
+    result = {"propose": len(deals) >= threshold, "field": field, "precedents": [p["id"] for p in precedents],
+              "deals": deals, "max_gap_days": None, "proposal": None}
+    if field == "booking_date":
+        contracts = latest_by_id(rows.get("contracts", []))
+        gaps = [_days_between(_loads(p["override_json"])["value"], contracts[d]["countersigned_at"])
+                for p in precedents if (d := _loads(p["scope_json"])["deal_id"]) in contracts
+                and contracts[d].get("countersigned_at")]
+        if gaps:
+            result["max_gap_days"] = max(gaps)
+            result["proposal"] = (f"book a deal in the quarter the customer signed when the countersignature follows "
+                                  f"within {max(gaps)} days, instead of on the countersignature date")
+    elif field == "base":
+        result["proposal"] = "review the commissionable base rule: deals were paid on a base other than the signed ACV"
+    return {"fn": "check_precedent_pattern", "args": {"field": field, "threshold": threshold}, "result": result}
+
+
 CHECKS = {fn.__name__: fn for fn in (check_splits, check_backdating, check_collection, check_termination,
-                                     check_territory, check_plan_drift, check_resubmission)}
+                                     check_territory, check_plan_drift, check_resubmission, check_precedent_pattern)}

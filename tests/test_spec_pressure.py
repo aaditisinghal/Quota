@@ -300,3 +300,33 @@ def test_a_clawback_receivable_nets_against_the_reps_next_payroll(acv):
         assert_books_clean(client)
     finally:
         session.close()
+
+
+# ---------- learning: repeated precedents become a proposed plan change (SPEC judge Q&A) ----------
+
+def test_the_same_exception_twice_becomes_a_proposed_plan_change_never_a_silent_rule(client):
+    to_the_controller(client)
+    say(client, "priya.nair", "approve A-0002")                                    # P-0001: Acme in Q1
+    session = client.app.state.session
+    wp = session.world.wp
+    wp.append_fact("deals", {"id": "cobalt", "account": "Cobalt Mining", "crm_amount_cents": 6_000_000,
+                             "crm_close_date": "2026-03-30", "stage": "closed_won", "owner_id": "jordan.kim",
+                             "splits_json": [{"rep": "jordan.kim", "bps": 10000}], "source": "crm"}, "seed")
+    wp.append_fact("contracts", {"id": "cobalt", "deal_id": "cobalt", "acv_cents": 6_000_000, "term_months": 24,
+                                 "contract_date": "2026-04-03", "countersigned_at": "2026-04-03T15:00:00Z",
+                                 "clauses_json": {}, "doc_ref": "contracts/cobalt.pdf", "source": "esign"}, "seed")
+    turn = say(client, "marcus.lee", "Honor Mar 30 for Cobalt. Count it in Q1.")
+    approval = kinds(turn["timeline"], "APPROVAL")[0]["text"].split()[0]
+    done = say(client, "marcus.lee", f"approve {approval}")                        # $3,000: within his limit
+    proposal = next(i for i in done["timeline"] if i["kind"] == "DECISION" and "plan_change_proposal" in i["text"])
+    assert "2 approved booking_date exceptions (P-0001, P-0002 on acme, cobalt)" in proposal["text"]
+    assert "countersignature follows within 4 days" in proposal["text"]
+    ask = next(i for i in done["timeline"] if i["kind"] == "MESSAGE" and "to marcus.lee" in i["text"])
+    assert "Nothing changes until a signed plan amendment" in ask["text"]
+    ro = session.ro
+    decision = queries.fetch_one(ro, "SELECT * FROM decisions WHERE kind = 'plan_change_proposal'")
+    assert queries.replay_decision(ro, decision["id"])[0]
+    plans = queries.fetch_all(ro, "SELECT * FROM plans WHERE rep_id = 'jordan.kim'")
+    assert len(plans) == 1                                                         # the plan itself is untouched
+    assert say(client, "jordan.kim", "Thanks!")["replies"] == []
+    assert_books_clean(client)

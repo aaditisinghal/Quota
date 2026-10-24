@@ -669,7 +669,32 @@ class CommissionsAnalyst(Seat):
         rows = queries.commission_rows(self.ro, rep, self.now)
         calc = calculator.commission_decision(rows, deal["id"], rep, self.now)
         line = ctx.data["line"]
-        return [self.record_calc(rows, deal["id"], rep, calc, line["id"] if line else None)[0]]
+        decision_ids = [self.record_calc(rows, deal["id"], rep, calc, line["id"] if line else None)[0]]
+        return decision_ids + self.propose_plan_change(claim.field)
+
+    def propose_plan_change(self, field) -> list[str]:
+        """The same kind of exception approved on several deals becomes a proposed plan change for Sales Ops to
+        sign (SPEC "How does it learn?"). Each case still needs its own exception until a signed amendment."""
+        precedents = [p for p in queries.fetch_all(self.ro, "SELECT * FROM precedents WHERE known_at <= ? ORDER BY id",
+                                                   (self.now,)) if queries.loads(p["scope_json"]).get("field") == field]
+        deal_ids = sorted({queries.loads(p["scope_json"])["deal_id"] for p in precedents})
+        rows = {"precedents": precedents, "contracts": [c for d in deal_ids for c in queries.fetch_all(
+            self.ro, "SELECT * FROM contracts WHERE deal_id = ? AND known_at <= ?", (d, self.now))]}
+        output = checks.check_precedent_pattern(rows, field, config.PROPOSE_PLAN_CHANGE_AFTER)
+        result = output["result"]
+        proposed_before = [set(json.loads(d["output_json"])["result"]["deals"])
+                           for d in self.decisions(kind="plan_change_proposal")
+                           if json.loads(d["output_json"])["args"]["field"] == field]
+        if not result["propose"] or any(set(result["deals"]) <= before for before in proposed_before):
+            return []
+        owner = routing.owner("plan_config")
+        text = (f"{len(result['deals'])} approved {field} exceptions ({', '.join(result['precedents'])} on "
+                f"{', '.join(result['deals'])}): proposed plan change for {owner} to sign: {result['proposal']}")
+        return [self.flag("plan_change_proposal", field, rows, output, "escalated", text,
+                          [(owner, f"Proposed plan change: {result['proposal']}. Why: the same exception was approved "
+                                   f"{len(result['deals'])} times ({', '.join(result['precedents'])} on "
+                                   f"{', '.join(result['deals'])}). Nothing changes until a signed plan amendment; "
+                                   f"until then each case still needs its own exception. Do you want to draft it?")])]
 
     # ---------- job.due payroll_file ----------
 
