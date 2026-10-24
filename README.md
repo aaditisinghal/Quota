@@ -77,7 +77,7 @@ printed timeline on the right of each:
   resolved, the source rows with the column that was used marked, precedents and approvers. An as-of slider
   replays it with only what was known then.
 - **Today + Ledger health.** What Quota did today, what is waiting on whom, and what is held, with totals.
-  Eight invariant checks, four subledger tie-outs, the trial balance with what moved since the last clock you
+  Seven invariant checks (INV1, INV2, INV4 to INV8; the contract has no INV3), four subledger tie-outs, the trial balance with what moved since the last clock you
   saw, and period locks.
 - **Inject + Scorecard.** Type what happens ("Acme churns in June with money back"), preview the events,
   edit a field, run. Below it, the measured scorecard for seed 7, case by case.
@@ -98,7 +98,7 @@ entries. Refusals show as timeline items with their reason codes. Orange marks o
    CL-0001.
 5. Inject "Advance the clock to May 15": the accrual, approval and May payroll run. Then inject "Acme churns in
    June with money back": a $90,000 refund (what was paid, less three months served), an $18,000 clawback to
-   1290, and $16,500 of deferred commission written off. All eight checks stay green, every tie-out holds,
+   1290, and $16,500 of deferred commission written off. Every invariant check stays green, every tie-out holds,
    and the trial balance balances.
 6. Trace CL-0002 now: clawed back, paid in PR-2026-05. Slide as-of to April 30: approved, with only the accrual
    JE-0004 behind it.
