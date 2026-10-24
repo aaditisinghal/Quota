@@ -12,7 +12,7 @@ hash-chained ledger that refuses anything breaking an invariant.
 | Ledger, invariants, hash chain | Real, built here | Invariants checked on every write; `python -m quota verify` recomputes the chain from genesis and re-hashes every row |
 | Commission calculator, amortization, entries | Real, deterministic | Unit tests against hand-calculated cases ($12,000 vs $18,000 on Acme, 36 x $500 amortization, the $18,000 / $16,500 / $1,500 clawback) |
 | Decisions | Real, replayable | Every decision records its inputs (table, id, version, sha256); `python -m quota replay D-0005` recomputes it from that as-of view |
-| Billing (invoices, payments, refunds) | Simulated | Stripe test mode was not built; billing events carry Stripe-style ids and are mirrored idempotently on that id (a duplicate webhook counts once) |
+| Billing (invoices, payments, refunds) | Real with `--stripe`: Stripe sandbox, test clocks; simulated otherwise | Objects visible in the Stripe dashboard (metadata `quota_run`); every billing row carries its Stripe id (`in_...`, `pi_...`, `re_...`) as `external_ref`. Test clocks follow the simulated calendar. A duplicate payment event is stopped by the mirror's idempotency check before it reaches Stripe |
 | CRM, contracts, plans, HR, e-signature | Simulated, seeded | `quota/sim/generator.py` (Fernhill) and the seed; facts arrive as events when the clock reaches them |
 | People (VP, Controller, payroll, reps) | Scripted in the Acme demo, rule-played in the eval, model-played with `--live` | `quota/agent/personas.py`; people act only through the same approval and chat API, with the same write-path capabilities |
 | Models | Claude Opus 5.5 (`claude-opus-5-5`) for extraction, reply wording and `--live` people only | Every extracted number must appear verbatim in its source; replies are checked so every $ amount and date exists in the facts. The eval below uses no model |
@@ -33,6 +33,13 @@ hash-chained ledger that refuses anything breaking an invariant.
 | Escalations per 100 events | 0.7 | 0.7 | 0.7 |
 | Replay match | 100% (554 decisions) | 100% (580 decisions) | 100% |
 | Write-path refusals | 2, both INV6_PAYROLL_MISMATCH (the two planted payroll-export edits) | 2, same | 2, same |
+
+**With real Stripe billing.** `python -m quota eval --seed 7 --stripe` reproduced the seed-7 column exactly
+(40/40, 0 false flags, 0 wrong payouts, pushback 10/10 and 10/10, 94.7% straight-through, 100% replay) while
+billing ran in a Stripe sandbox. It created 81 test clocks, 241 customers and invoices, 210 card payments and 3
+refunds. Stripe's own search confirms 241 invoices for the run (210 paid, 31 still open at June 30, including the
+planted 120-days-late customers) and 3 succeeded refunds totalling $214,916.66, and all 454 billing rows carry
+Stripe ids. It takes about 26 minutes, because every test-clock advance waits for Stripe.
 
 **Misses.** Held-out seed 1729, first run: **E09-0001** (expected `posted`, got `held`; amount right). The miss was
 in the answer key, not in Quota. The E09 plant made the departing rep's own deals collected before the
@@ -55,8 +62,7 @@ column.
 - Seed 1729 was chosen by the builder, not hidden by a teammate.
 - Straight-through counts lines approved or paid with no hold, escalation or dispute; the Controller's routine
   approval of accrual and payroll batches is not counted as a human touch.
-- Not built yet: Stripe test mode, the SEC 10-K policy citations, the "attack your own controls" exercise, and
-  the Phase 4 screens.
+- Not built yet: the SEC 10-K policy citations, the "attack your own controls" exercise, and the Phase 4 screens.
 
 ## Planted errors and what Quota does
 
@@ -99,6 +105,9 @@ python -m quota eval --seed 7
   `.llm_cache/`, so a rerun is free).
 - `python -m quota eval --seed N [--reps 20]`: the scorecard; writes `runs/seed-N/answer_key.json` and
   `scorecard.json`.
+- `--stripe` (on `demo acme` and `eval`): billing runs in a Stripe sandbox. Put a sandbox key in `.env` as
+  `STRIPE_API_KEY=sk_test_...` (git-ignored; see `.env.example`). Only test keys are accepted.
+  `QUOTA_STRIPE_LIVE=1 pytest tests/test_stripe_live.py` runs the Acme demo against the sandbox.
 - `python -m quota verify|replay|tb --db PATH`: chain and invariants, decision replay, trial balance as of a time
   (write a ledger with `demo acme --db PATH`).
 - `pytest -q`: the test suite.
