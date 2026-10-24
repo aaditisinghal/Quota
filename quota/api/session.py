@@ -17,6 +17,7 @@ import threading
 from quota import config
 from quota.agent.extract import ModelExtractor
 from quota.agent.personas import PolicyPeople
+from quota.api.chat import RuleExtractor
 from quota.ledger import queries
 from quota.sim import demo_acme, seed_acme
 from quota.sim.generator import generate
@@ -81,10 +82,14 @@ def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None) ->
     session = Session(world, "acme", mode, llm)
     if mode == "live":
         session.analyst.extractor, session.analyst.llm = ModelExtractor(llm), llm
+    else:
+        session.analyst.extractor = RuleExtractor(script["extractions"])
     return session
 
 
 def fernhill_session(seed: int = 7, reps: int = 20, stripe=None) -> Session:
     world = generate(seed, reps=reps, out=lambda line: None, stripe=stripe)
     world.run_until(world.end_ts)
-    return Session(world, "fernhill", seed=seed)
+    session = Session(world, "fernhill", seed=seed)
+    session.analyst.extractor = RuleExtractor(session.analyst.extractor.table)
+    return session

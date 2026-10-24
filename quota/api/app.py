@@ -1,13 +1,15 @@
-"""FastAPI over one running world (section 14). Read-only except the three action endpoints, which are added
-in `actions.py`. The built front end, when present, is served from `static/` at `/`."""
+"""FastAPI over one running world (section 14). Read-only except the three action endpoints: POST /chat,
+/inject/parse and /inject/run. The built front end, when present, is served from `static/` at `/`."""
 
 import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from quota.api import views
+from quota.api import chat as chat_turn
+from quota.api import inject, views
 
 STATIC = Path(__file__).with_name("static")
 
@@ -20,6 +22,20 @@ def scorecard(seed: int, runs_dir: Path) -> dict:
         from quota.eval import run_eval
         run_eval(seed, out_dir=path.parent)
     return {"seed": seed, "source": str(path), **json.loads(path.read_text(encoding="utf-8"))}
+
+
+class ChatIn(BaseModel):
+    as_principal: str
+    text: str
+    to: str | None = None
+
+
+class ParseIn(BaseModel):
+    text: str
+
+
+class RunIn(BaseModel):
+    events: list[dict]
 
 
 def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
@@ -73,6 +89,27 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
     @app.get("/scorecard")
     def get_scorecard(seed: int = 7):
         return scorecard(seed, runs)
+
+    @app.post("/chat")
+    def post_chat(body: ChatIn):
+        with session.lock:
+            try:
+                return chat_turn.chat(session, body.as_principal, body.text, body.to)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc))
+
+    @app.post("/inject/parse")
+    def post_parse(body: ParseIn):
+        with session.lock:
+            return inject.parse(session, body.text)
+
+    @app.post("/inject/run")
+    def post_run(body: RunIn):
+        with session.lock:
+            try:
+                return inject.run(session, body.events)
+            except inject.InjectError as exc:
+                raise HTTPException(422, str(exc))
 
     if Path(static_dir).joinpath("index.html").exists():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
