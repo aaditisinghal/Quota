@@ -1,0 +1,19 @@
+plan_id: AE-2026-H1
+version: 3
+rep: jordan.kim
+effective: {from: 2026-01-01, to: 2026-06-30}
+signed_doc: plans/jordan.kim/AE-2026-H1-v3.pdf
+signed_at: 2025-12-18T17:00:00Z
+quota: {period: quarter, amount: 300000}
+booking_date: countersignature            # section 4
+commissionable_base: year1_acv
+rates:
+  - {tier: base, up_to_attainment: 1.00, rate: 0.10}
+  - {tier: accelerator, above_attainment: 1.00, rate: 0.15}
+splits: {must_sum_to: 1.00, approver: vp_sales_ops}
+spiffs: []
+pay_on: collection
+collection_hold_days: 90
+clawback: {window_months: 6, triggers: [churn, termination_for_convenience, full_refund], basis: full}
+termination: {pay_if_booked_and_collected_before: end_date}
+manager_override: {rate: 0.02, manager: morgan.diaz}   # ignored in Phase 1

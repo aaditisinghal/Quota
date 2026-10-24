@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quota"
+version = "0.1.0"
+description = "Quota: an agent-run commissions desk with an append-only, hash-chained ledger."
+requires-python = ">=3.11"
+dependencies = ["pyyaml", "pytest"]
+
+[tool.setuptools.packages.find]
+include = ["quota*"]
+
+[tool.setuptools.package-data]
+"quota.ledger" = ["schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
