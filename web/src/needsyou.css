@@ -1,0 +1,181 @@
+/* Needs you (Home, D5). Open items wear the accent; an answered card turns green (approved), muted red (rejected)
+   or blue (reply sent) and stays in place for the session. Light mode only, like the rest of the screens. */
+
+.nyb {
+  --ny-green: #34c759;
+  --ny-green-bg: #e9f8ee;
+  --ny-green-ink: #146c2e;
+  --ny-red: #e5a3a0;
+  --ny-red-bg: #fbf1f0;
+  --ny-red-ink: #9b2c24;
+  --ny-blue: #9cc3ef;
+  --ny-blue-bg: #eef5fd;
+  --ny-blue-ink: #1d4f8c;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px 16px;
+  min-width: 0;
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+}
+.nyb.has-open { border-color: var(--accent-line); }
+
+/* header: title, open count, progress */
+.nyb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.nyb-head h3 { margin: 0; display: flex; align-items: center; gap: 8px; }
+.nyb.has-open .nyb-head h3 { color: var(--accent); }
+.nyb-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 7px;
+  border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; letter-spacing: 0;
+  text-transform: none;
+}
+.nyb-count.zero { background: var(--ny-green); }
+.nyb-progress { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.nyb-bar { width: 72px; height: 6px; border-radius: 999px; background: var(--line-2); overflow: hidden; display: inline-block; }
+.nyb-bar > span { display: block; height: 100%; background: var(--ny-green); border-radius: inherit; transition: width 300ms ease; }
+
+/* empty state */
+.nyb-clear {
+  display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--ny-green); background: var(--ny-green-bg); color: var(--ny-green-ink); font-weight: 600;
+}
+.nyb-clear-mark {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--ny-green); color: #fff; font-size: 13px; flex: none;
+}
+
+/* one person's queue */
+.nyb-person { margin-top: 14px; }
+.nyb-who { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: 13.5px; }
+.nyb-who-count { margin-left: auto; }
+
+/* a card */
+.nyc {
+  position: relative;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-bg);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  transition: background-color 300ms ease, border-color 300ms ease, box-shadow 300ms ease;
+}
+.nyc.approved { border-color: var(--ny-green); background: var(--ny-green-bg); box-shadow: 0 0 0 1px var(--ny-green); }
+.nyc.rejected { border-color: var(--ny-red); background: var(--ny-red-bg); }
+.nyc.replied { border-color: var(--ny-blue); background: var(--ny-blue-bg); }
+
+.nyc-head { display: flex; align-items: flex-start; gap: 12px; }
+.nyc-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.nyc-kind { font-weight: 600; font-size: 14.5px; color: var(--ink); letter-spacing: -0.005em; }
+.nyc-sub { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; font-size: 13px; color: var(--ink-2); }
+a.nyc-deal { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--ink-3); font-weight: 500; }
+a.nyc-deal:hover { background: var(--line-2); }
+.nyc-dot { color: var(--ink-3); }
+.nyc-impact { flex: none; text-align: right; font-size: 20px; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.nyc-impact a.money { border-bottom-width: 2px; font-weight: 650; }
+.nyc.open .nyc-impact a.money { color: var(--accent); border-bottom-color: var(--accent-line); }
+.nyc.approved .nyc-impact a.money { color: var(--ny-green-ink); border-bottom-color: var(--ny-green); }
+.nyc.rejected .nyc-impact a.money { color: var(--ink-2); text-decoration: line-through; text-decoration-thickness: 1px; }
+.nyc-noimpact { font-size: 12.5px; font-weight: 400; color: var(--ink-3); }
+
+/* the seat's question */
+.nyc-q { margin: 8px 0 4px; }
+.nyc-q-text { font-size: 13.5px; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+.nyc-q-text.clamped { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.nyc.approved .nyc-q-text, .nyc.rejected .nyc-q-text, .nyc.replied .nyc-q-text { color: var(--ink-2); }
+.nyc-toggle, .nyc-link {
+  border: 0; background: none; padding: 0; margin-top: 2px; font-size: 12.5px; color: var(--ink-2);
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.nyc-toggle:hover, .nyc-link:hover { color: var(--ink); }
+
+/* collapsibles */
+.nyc-more { margin-top: 6px; font-size: 12.5px; }
+.nyc-more > summary {
+  cursor: pointer; list-style: none; color: var(--ink-2); font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+  user-select: none;
+}
+.nyc-more > summary::-webkit-details-marker { display: none; }
+.nyc-more > summary::before { content: "▸"; font-size: 10px; color: var(--ink-3); transition: transform 150ms ease; display: inline-block; }
+.nyc-more[open] > summary::before { transform: rotate(90deg); }
+.nyc-more > summary:hover { color: var(--ink); }
+.nyc-n {
+  font-size: 11px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line);
+  color: var(--ink-2); text-align: center; line-height: 15px;
+}
+.nyc-evidence { list-style: none; margin: 6px 0 2px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.nyc-evidence li { display: flex; gap: 8px; align-items: baseline; }
+.nyc-evidence li + li { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line-2); }
+.nyc-ev-text { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+
+/* chain: a small vertical timeline */
+.nyc-chain { list-style: none; margin: 6px 0 2px; padding: 8px 10px 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.nyc-chain li { position: relative; display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; padding-bottom: 8px; }
+.nyc-chain li:last-child { padding-bottom: 0; }
+.nyc-chain li::before {
+  content: ""; position: absolute; left: 7px; top: 12px; bottom: -2px; width: 2px; background: var(--line);
+}
+.nyc-chain li:last-child::before { display: none; }
+.nyc-chain-dot {
+  position: relative; z-index: 1; width: 10px; height: 10px; margin: 4px 0 0 3px; border-radius: 50%;
+  background: var(--panel); border: 2px solid var(--ink-3); font-size: 10px; line-height: 1;
+}
+.nyc-chain li.current .nyc-chain-dot { border-color: var(--accent); background: var(--accent); }
+.nyc-chain li.outcome.approved .nyc-chain-dot { border-color: var(--ny-green); background: var(--ny-green); }
+.nyc-chain li.outcome.rejected .nyc-chain-dot { border-color: var(--ny-red-ink); background: var(--ny-red-ink); }
+.nyc-chain li.outcome.replied .nyc-chain-dot { border-color: var(--ny-blue-ink); background: var(--ny-blue-ink); }
+.nyc-chain li.outcome .nyc-chain-text { font-weight: 600; }
+.nyc-chain li.refused .nyc-chain-dot { width: 16px; height: 16px; margin: 0; border: 0; background: none; font-size: 12px; text-align: center; }
+.nyc-chain-at { display: block; font-size: 11.5px; color: var(--ink-3); }
+.nyc-chain-text { color: var(--ink); overflow-wrap: anywhere; }
+.nyc-chain li.refused .nyc-chain-text { color: var(--bad); }
+
+/* answer box */
+.nyc-answer { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--accent-line); display: grid; gap: 8px; }
+.nyc-answer textarea { resize: vertical; min-height: 54px; background: var(--panel); font-size: 13.5px; }
+.nyc-answer textarea[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }
+.nyc-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nyc-actions button { font-weight: 500; }
+.nyc-actions button.nyc-approve { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.nyc-actions button.nyc-approve:hover:not(:disabled) { background: #000; }
+.nyc-actions button.nyc-reject:hover:not(:disabled) { border-color: var(--bad); color: var(--bad); }
+.nyc-kbd { margin-left: auto; font-size: 11.5px; }
+.nyc-kbd kbd { margin: 0 1px; }
+.nyc-hint { margin: 0; font-size: 12.5px; color: var(--bad); }
+.nyc-refused {
+  margin: 0; padding: 8px 10px; border-radius: 6px; border: 1px solid #f1b8b3; background: #fdf0ef; color: var(--bad); font-size: 13px;
+}
+
+/* outcome */
+.nyc-outcome { margin-top: 10px; padding: 10px 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.7); animation: nyc-in 300ms ease both; }
+.nyc-outcome-head { display: flex; align-items: baseline; gap: 10px; }
+.nyc-outcome-head strong { font-size: 14.5px; }
+.nyc-outcome-actions { margin-left: auto; display: flex; gap: 12px; }
+.nyc.approved .nyc-outcome-head strong { color: var(--ny-green-ink); }
+.nyc.rejected .nyc-outcome-head strong { color: var(--ny-red-ink); }
+.nyc.replied .nyc-outcome-head strong { color: var(--ny-blue-ink); }
+.nyc-comment {
+  margin: 8px 0 0; padding: 2px 0 2px 10px; border-left: 3px solid var(--line); color: var(--ink); font-size: 13.5px;
+  font-style: italic; overflow-wrap: anywhere;
+}
+.nyc-comment::before { content: "\201C"; }
+.nyc-comment::after { content: "\201D"; }
+.nyc.approved .nyc-comment { border-left-color: var(--ny-green); }
+.nyc.rejected .nyc-comment { border-left-color: var(--ny-red); }
+.nyc.replied .nyc-comment { border-left-color: var(--ny-blue); }
+.nyc-result { margin-top: 6px; font-size: 13px; color: var(--ink); font-weight: 500; }
+.nyc-also { margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
+
+@keyframes nyc-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.nyb .sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nyc, .nyb-bar > span, .nyc-more > summary::before { transition: none; }
+  .nyc-outcome { animation: none; }
+}

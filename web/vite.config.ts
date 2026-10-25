@@ -7,6 +7,7 @@ const api = "http://127.0.0.1:8000";
 const paths = [
   "/state", "/timeline", "/trace", "/ledger", "/today", "/scorecard", "/messages", "/statement", "/chat", "/inject",
   "/scenarios", "/demo", "/intake", "/review", "/api",
+  "/home", "/sources", "/reps", "/contracts", "/lines", "/needs-you",
 ];
 
 export default defineConfig({
