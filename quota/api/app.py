@@ -42,10 +42,17 @@ class RunIn(BaseModel):
 
 class StepIn(BaseModel):
     n: int
+    script: str = "default"
 
 
 class ReviewIn(BaseModel):
     resolution: dict
+
+
+class AnswerIn(BaseModel):
+    as_principal: str
+    decision: str = "approve"          # approve | reject | reply
+    text: str | None = None
 
 
 class AuditorIn(BaseModel):
@@ -62,6 +69,21 @@ DEMO_STEPS = [
     ("cp_may_close", "May payroll paid Jordan; two months of amortization are posted."),
     ("cp_end", "Acme churns June 30: refund, clawback to 1290, and every invariant still holds."),
 ]
+# DEMO_FLOW D6: the CFO's morning. The UI owns routes and narration on screen; the server only restores state.
+# cfo_morning is the served Acme world (with its cast) on 2026-05-15: Acme's Q1 exception waits on Priya, and
+# Riley's side letter holds Summit out of May payroll.
+CFO_STEPS = [
+    ("cfo_morning", "Home: every input, every rep, and what needs the CFO this morning."),
+    ("cfo_morning", "Reps board: Jordan."),
+    ("cfo_morning", "Acme contract: the calibration panel (80, cleared with a note) and Jordan's dispute."),
+    ("cfo_morning", "Orbit: the split, Alex's and Riley's views."),
+    ("cfo_morning", "Needs you: Summit's side letter for Priya, and the Acme exception chain."),
+    ("cfo_morning", "The answers clear the inbox."),
+    ("cp_end", "June 30: the ledger health cascade after Acme churns."),
+    ("cp_may_close", "Birch churns (run the birch_churns scenario from here)."),
+    ("cp_end", "Needs you: 0. Finance sorted."),
+]
+DEMO_SCRIPTS = {"default": DEMO_STEPS, "cfo": CFO_STEPS}
 
 def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
     app = FastAPI(title="Quota", version="0.4")
@@ -174,21 +196,30 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
             session.swap(session.restart(), None)
             return {"clock": session.world.clock.now(), "timeline": views.timeline(session.world, 0)}
 
-    def demo_steps():
-        return [{"n": n, "checkpoint": cp, "narration": text} for n, (cp, text) in enumerate(DEMO_STEPS)]
+    def demo_steps(script: str = "default"):
+        if script not in DEMO_SCRIPTS:
+            raise HTTPException(404, f"no presenter script {script!r}; try {sorted(DEMO_SCRIPTS)}")
+        return [{"n": n, "checkpoint": cp, "narration": text} for n, (cp, text) in enumerate(DEMO_SCRIPTS[script])]
 
     def demo_step(body: StepIn):
-        if not 0 <= body.n < len(DEMO_STEPS):
-            raise HTTPException(400, f"steps are 0..{len(DEMO_STEPS) - 1}")
-        checkpoint, narration = DEMO_STEPS[body.n]
+        steps = DEMO_SCRIPTS.get(body.script)
+        if steps is None:
+            raise HTTPException(404, f"no presenter script {body.script!r}")
+        if not 0 <= body.n < len(steps):
+            raise HTTPException(400, f"steps are 0..{len(steps) - 1}")
+        checkpoint, narration = steps[body.n]
         with session.lock:
-            if checkpoint == "start":
+            if checkpoint == "cfo_morning":
+                if session.scenario != "cfo_morning":      # one build serves every morning step
+                    from quota.search import auditor_world
+                    session.swap(auditor_world.build().world, "cfo_morning")
+            elif checkpoint == "start":
                 demo_reset()
             else:
                 session.poll_findings()                    # E6: once at each demo step
                 checkpoints.ensure_snapshots(session.checkpoint_dir)
                 session.swap(checkpoints.restore(checkpoint, directory=session.checkpoint_dir).world, checkpoint)
-            return {"n": body.n, "checkpoint": checkpoint, "narration": narration,
+            return {"n": body.n, "script": body.script, "checkpoint": checkpoint, "narration": narration,
                     "clock": session.world.clock.now(), "timeline": views.timeline(session.world, 0)}
 
     def auditor(body: AuditorIn):
@@ -213,6 +244,59 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
             except Exception as exc:
                 return {"ok": False, "ledger": local, "mirror": None,
                         "line": f"mirror unreachable: {type(exc).__name__}: {str(exc)[:200]}"}
+
+    # ---------- DEMO_FLOW D1-D5: the CFO flow's read model ----------
+
+    def flow():
+        from quota.api.demo_flow import Flow
+        return Flow(session)
+
+    def found(value, what):
+        if value is None:
+            raise HTTPException(404, f"no {what}")
+        return value
+
+    def line_confidence(line_id: str):
+        with session.lock:
+            return found(flow().confidence(line_id), f"commission line {line_id}")
+
+    def line_calibration(line_id: str):
+        with session.lock:
+            return found(flow().calibration(line_id), f"commission line {line_id}")
+
+    def sources_rail():
+        with session.lock:
+            return flow().sources()
+
+    def source_rows(kind: str, q: str | None = None, limit: int = Query(200, ge=1, le=5000)):
+        if kind not in ("contracts", "messages", "crm", "hr", "stripe", "payouts"):
+            raise HTTPException(404, f"no source {kind!r}")
+        with session.lock:
+            return flow().source_rows(kind, q, limit)
+
+    def reps_board():
+        with session.lock:
+            return flow().reps()
+
+    def rep_view(rep_id: str):
+        with session.lock:
+            return found(flow().rep_detail(rep_id), f"rep {rep_id}")
+
+    def contract_view(deal_id: str, viewer: str | None = None):
+        with session.lock:
+            return found(flow().contract(deal_id, viewer), f"contract for {deal_id}")
+
+    def needs_you():
+        with session.lock:
+            return flow().needs_you()
+
+    def needs_you_answer(item_id: str, body: AnswerIn):
+        with session.lock:
+            return flow().answer(item_id, body.as_principal, body.decision, body.text)
+
+    def home_kpis():
+        with session.lock:
+            return flow().home()
 
     def intake_view():
         if session.intake is None:
@@ -240,6 +324,16 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
 
     for prefix in ("/api", ""):        # NEXT_TASKS names /api/...; the UI calls the root paths like the rest
         app.get(f"{prefix}/intake")(intake_view)
+        app.get(f"{prefix}/lines/{{line_id}}/confidence")(line_confidence)
+        app.get(f"{prefix}/lines/{{line_id}}/calibration")(line_calibration)
+        app.get(f"{prefix}/sources")(sources_rail)
+        app.get(f"{prefix}/sources/{{kind}}/rows")(source_rows)
+        app.get(f"{prefix}/reps")(reps_board)
+        app.get(f"{prefix}/reps/{{rep_id}}")(rep_view)
+        app.get(f"{prefix}/contracts/{{deal_id}}")(contract_view)
+        app.get(f"{prefix}/needs-you")(needs_you)
+        app.post(f"{prefix}/needs-you/{{item_id}}/answer")(needs_you_answer)
+        app.get(f"{prefix}/home")(home_kpis)
         app.get(f"{prefix}/elastic/verify")(elastic_verify)
         app.post(f"{prefix}/auditor")(auditor)
         app.post(f"{prefix}/review/{{item_id}}")(review_resolve)

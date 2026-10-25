@@ -211,9 +211,13 @@ def commission_decision(rows, deal_id, rep_id, now) -> dict:
         "result": asdict(result),
     }
     resolutions = {"booking_date": booking_res, "base": base_res, "splits": resolved["splits"]}
+    precedent_ids = [r.source.split(":", 1)[1] for r in resolutions.values() if r.basis == "precedent"]
+    # DEMO_FLOW D1: how sure Quota is, from this decision's own evidence (replay reproduces it).
+    from quota.engine import confidence
+    output["confidence"] = confidence.stored({k: ranking.to_dict(v) for k, v in resolutions.items()}, precedent_ids)
     return {
         "output": output,
         "resolutions": {k: ranking.to_dict(v) for k, v in resolutions.items()},
-        "precedent_ids": [r.source.split(":", 1)[1] for r in resolutions.values() if r.basis == "precedent"],
+        "precedent_ids": precedent_ids,
         "result": result, "booking": this, "plan": plan, "resolved": resolutions,
     }

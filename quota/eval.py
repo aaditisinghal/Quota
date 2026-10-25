@@ -213,6 +213,29 @@ def attach_gate(world, corpus) -> None:
         case["max_payout_cents"] = 0
 
 
+def confidence_separation(world) -> dict:
+    """DEMO_FLOW D1: how well the confidence score separates lines on planted-error deals from clean lines
+    (reported as separation, not calibration)."""
+    from types import SimpleNamespace
+
+    from quota.api.demo_flow import Flow
+    analyst = next(s for s in world.seats if s.principal == "seat:commissions_analyst")
+    flow = Flow(SimpleNamespace(world=world, analyst=analyst))
+    planted = set().union(*(case_deals(c) for c in world.answer_key)) if world.answer_key else set()
+    scored = []
+    for line in queries.fetch_all(world.ro, "SELECT * FROM commission_lines WHERE amount_cents > 0 AND corrects_id IS NULL"):
+        if queries.line_status(world.ro, line["id"]) in ("superseded",):
+            continue
+        c = flow.confidence(line["id"])
+        if c:
+            scored.append((line["deal_id"] in planted, c["score"], bool(c["hold"])))
+    bad = [s for p, s, _ in scored if p]
+    clean = [s for p, s, _ in scored if not p]
+    return {"planted_lines": len(bad), "planted_below_70": sum(s < 70 for s in bad),
+            "clean_lines": len(clean), "clean_at_least_90": sum(s >= 90 for s in clean),
+            "clean_70_to_89": sum(70 <= s < 90 for s in clean), "clean_below_70": sum(s < 70 for s in clean)}
+
+
 def gate_score(world) -> dict | None:
     key = getattr(world, "messages_key", None)
     if key is None:
@@ -249,7 +272,8 @@ def run_eval(seed: int, reps: int = 20, out_dir=None, pushback: bool = True, str
         out.mkdir(parents=True, exist_ok=True)
         (out / "answer_key.json").write_text(json.dumps(world.answer_key, indent=2), encoding="utf-8")
     world.run_until(world.end_ts)
-    card = {"seed": seed, "reps": reps, **score(world), "gate": gate_score(world)}
+    card = {"seed": seed, "reps": reps, **score(world), "gate": gate_score(world),
+            "confidence": confidence_separation(world)}
     if sandbox:
         mirrored = queries.fetch_all(world.ro, "SELECT external_ref FROM billing")
         card["stripe"] = {"run": sandbox.run_tag, **sandbox.created,
@@ -280,6 +304,10 @@ def format_scorecard(card: dict) -> list[str]:
     lines.append("misses: " + (", ".join(misses) if misses else "none"))
     codes = ", ".join(f"{code} x{n}" for code, n in sorted(card["refusal_codes"].items()))
     lines.append(f"write-path refusals: {card['refusals']}" + (f" ({codes})" if codes else ""))
+    if card.get("confidence"):
+        c = card["confidence"]
+        lines.append(f"confidence separation: {c['planted_below_70']}/{c['planted_lines']} planted-error lines < 70; "
+                     f"{c['clean_at_least_90']}/{c['clean_lines']} clean lines >= 90")
     if card.get("stripe"):
         s = card["stripe"]
         lines.append(f"stripe sandbox ({s['run']}): {s['clocks']} test clocks, {s['customers']} customers, "
