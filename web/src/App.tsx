@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isMissing, type ScenarioRun, type TimelineItem, type WorldState } from "./api";
-import { CaseView, caseLineFor } from "./Case";
+import { CaseView, caseLineFor, type CaseNote } from "./Case";
 import { ChatPane } from "./ChatPane";
 import { HomeView } from "./Home";
 import { InjectScore } from "./InjectScore";
@@ -71,7 +71,11 @@ function route(): Route {
 export function App() {
   const [{ tab, id, contract, calibrate, source }, setRoute] = useState(route);
   const [traceId, setTraceId] = useState("CL-0001");
-  const [caseLine, setCaseLine] = useState("CL-0001");
+  // A shared #case/CL-x link opens on that line from the first render, not on CL-0001 for a moment.
+  const [caseLine, setCaseLine] = useState(() => {
+    const first = route();
+    return first.tab === "case" && first.id ? first.id : "CL-0001";
+  });
   const [state, setState] = useState<WorldState | null>(null);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [version, setVersion] = useState(0);
@@ -203,36 +207,35 @@ export function App() {
   const picked = useRef(false); // the user chose a speaker since the page loaded
   const stale = useRef(false); // they chose one on another tab; the Case tab catches up when opened plainly
   const following = useRef(0);
-  const [caseIdle, setCaseIdle] = useState<string | null>(null);
+  const [caseNote, setCaseNote] = useState<CaseNote | null>(null);
 
   const openCase = useCallback((line: string) => {
     following.current += 1; // an explicit choice outranks a follow still in flight
-    setCaseIdle(null);
+    setCaseNote(null);
     setCaseLine(line);
     window.location.hash = `case/${line}`;
   }, []);
 
+  const caseLineRef = useRef(caseLine);
+  caseLineRef.current = caseLine;
   const followCase = useCallback((who: string) => {
     const mine = ++following.current;
-    caseLineFor(who, peopleRef.current)
-      .then((line) => {
+    caseLineFor(who, peopleRef.current, caseLineRef.current)
+      .then((note) => {
         if (mine !== following.current) return;
-        if (!line) {
-          setCaseIdle(who);
-          return;
-        }
-        setCaseIdle(null);
-        setCaseLine(line);
-        if (tabRef.current === "case") window.location.hash = `case/${line}`;
+        setCaseNote(note);
+        if (!note.line) return; // nothing waits on them: keep the case on screen, with a note saying so
+        setCaseLine(note.line);
+        if (tabRef.current === "case") window.location.hash = `case/${note.line}`;
       })
-      .catch(() => mine === following.current && setCaseIdle(null));
+      .catch(() => mine === following.current && setCaseNote(null));
   }, []);
 
   const speak = useCallback(
     (who: string) => {
       picked.current = true;
       setPrincipal(who);
-      setCaseIdle(null);
+      setCaseNote(null);
       if (tabRef.current === "case") followCase(who);
       else stale.current = true;
     },
@@ -312,7 +315,7 @@ export function App() {
           {tab === "case" && (
             <CaseView line={caseLine} items={items} people={people} pending={pending} principal={principal}
                       setPrincipal={speak} away={state?.away ?? {}} version={version} onChange={update}
-                      onOpen={openCase} onRep={caseRep} idle={caseIdle} />
+                      onOpen={openCase} onRep={caseRep} note={caseNote} />
           )}
           {tab === "trace" && (
             <TraceView id={traceId} stops={stops} people={people}
