@@ -45,6 +45,7 @@ def cmd_demo(args) -> int:
         print(f"\nStripe sandbox run {stripe.run_tag}: {stripe.created}")
     if args.db:
         print(f"\nLedger written to {args.db}")
+    _mirror(demo.ro)
     demo.close()
     return 0 if demo.ok else 1
 
@@ -87,7 +88,7 @@ def cmd_eval(args) -> int:
     from quota.sim.stripe_billing import StripeSandboxError
     out_dir = Path(args.out) / f"seed-{args.seed}"
     try:
-        card = evaluation.run_eval(args.seed, reps=args.reps, out_dir=out_dir, stripe=args.stripe)
+        card = evaluation.run_eval(args.seed, reps=args.reps, out_dir=out_dir, stripe=args.stripe, after=_mirror)
     except StripeSandboxError as exc:
         print(f"--stripe: {exc}")
         return 2
@@ -135,6 +136,14 @@ def cmd_backtest(args) -> int:
     print(result["headline"])
     print(f"Written to {args.out}/backtest_{args.quarter}.json")
     return 0
+
+
+def _mirror(conn) -> None:
+    """E2: the end of a demo or eval run pushes the decision log to the Elastic mirror when it is configured."""
+    from quota.search.mirror import Mirror
+    pushed = Mirror()(conn)
+    if pushed is not None:
+        print(f"Elastic mirror: {pushed} documents pushed to quota-decisions")
 
 
 def cmd_gen_messages(args) -> int:

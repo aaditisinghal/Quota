@@ -185,7 +185,9 @@ def run_pushback(path=FIXTURE) -> dict:
 
 # ---------- the scorecard ----------
 
-def run_eval(seed: int, reps: int = 20, out_dir=None, pushback: bool = True, stripe: bool = False) -> dict:
+def run_eval(seed: int, reps: int = 20, out_dir=None, pushback: bool = True, stripe: bool = False,
+             after=None) -> dict:
+    """`after(conn)`, if given, runs on the finished world's ledger before it closes (the Elastic mirror)."""
     out = Path(out_dir) if out_dir else None
     sandbox = None
     if stripe:
@@ -201,6 +203,8 @@ def run_eval(seed: int, reps: int = 20, out_dir=None, pushback: bool = True, str
                           "mirrored": len(mirrored),
                           "mirrored_with_stripe_ids": sum(r["external_ref"].startswith(("in_1", "pi_", "re_"))
                                                           for r in mirrored)}
+    if after is not None:
+        after(world.ro)
     world.close()
     card["pushback"] = run_pushback() if pushback else None
     if out:

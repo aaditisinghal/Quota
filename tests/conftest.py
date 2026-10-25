@@ -2,6 +2,7 @@
 
 import itertools
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,10 @@ from quota.ledger.write_path import WritePath
 ANALYST = "seat:commissions_analyst"
 ACCOUNTANT = "seat:deferred_accountant"
 PLAN_PATH = Path(__file__).resolve().parents[1] / "plans" / "jordan.kim" / "AE-2026-H1-v3.yaml"
+
+# ELASTIC_TASKS: unit tests use the offline fallback; live Elastic tests run only with QUOTA_ELASTIC_LIVE=1.
+if not os.environ.get("QUOTA_ELASTIC_LIVE"):
+    os.environ["QUOTA_ELASTIC_OFF"] = "1"
 
 _db_names = itertools.count(1)
 

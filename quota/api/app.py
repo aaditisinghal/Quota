@@ -61,6 +61,17 @@ DEMO_STEPS = [
 def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
     app = FastAPI(title="Quota", version="0.4")
     app.state.session = session
+    from quota.search.mirror import Mirror
+    mirror = Mirror()
+
+    @app.middleware("http")
+    async def mirror_after_actions(request, call_next):
+        """E2: after every action, push new decisions to the Elastic mirror (a no-op when it is off)."""
+        response = await call_next(request)
+        if request.method == "POST":
+            with session.lock:
+                mirror(session.ro)
+        return response
     runs = Path(runs_dir)
 
     @app.get("/state")
@@ -174,6 +185,19 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
             return {"n": body.n, "checkpoint": checkpoint, "narration": narration,
                     "clock": session.world.clock.now(), "timeline": views.timeline(session.world, 0)}
 
+    def elastic_verify():
+        from quota.search import elastic_client
+        from quota.search import mirror as mirroring
+        with session.lock:
+            local = mirroring.head(mirroring.documents(session.ro))
+            if not elastic_client.configured():
+                return {"ok": None, "ledger": local, "mirror": None, "line": "Elastic is not configured"}
+            try:
+                return mirroring.verify(session.ro, mirror.client or elastic_client.es())
+            except Exception as exc:
+                return {"ok": False, "ledger": local, "mirror": None,
+                        "line": f"mirror unreachable: {type(exc).__name__}: {str(exc)[:200]}"}
+
     def intake_view():
         if session.intake is None:
             raise HTTPException(404, "no inbox attached; serve with --from-inbox (or run python -m quota intake inbox/)")
@@ -200,6 +224,7 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
 
     for prefix in ("/api", ""):        # NEXT_TASKS names /api/...; the UI calls the root paths like the rest
         app.get(f"{prefix}/intake")(intake_view)
+        app.get(f"{prefix}/elastic/verify")(elastic_verify)
         app.post(f"{prefix}/review/{{item_id}}")(review_resolve)
         app.get(f"{prefix}/scenarios")(scenario_menu)
         app.post(f"{prefix}/scenarios/{{name}}/run")(scenario_run)

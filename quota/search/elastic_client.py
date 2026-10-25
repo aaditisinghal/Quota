@@ -19,8 +19,10 @@ def _settings() -> tuple[str, str, str]:
 
 
 def configured() -> bool:
+    """Keys are set and Elastic is not switched off (the test suite sets QUOTA_ELASTIC_OFF unless it is asked
+    for live tests with QUOTA_ELASTIC_LIVE=1)."""
     es_url, _, key = _settings()
-    return bool(es_url and key)
+    return bool(es_url and key) and not os.environ.get("QUOTA_ELASTIC_OFF")
 
 
 def es():
