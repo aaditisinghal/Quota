@@ -213,6 +213,21 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_stripe(args) -> int:
+    from quota.integrations import stripe_connect
+    from quota.sim.stripe_billing import StripeSandboxError
+    run = {"connect-setup": stripe_connect.connect_setup, "orbit-split": stripe_connect.orbit_split}[args.action]
+    try:
+        run()
+    except stripe_connect.ConnectNotEnabled as exc:
+        print(f"stripe {args.action}: {exc}")
+        return 2
+    except StripeSandboxError as exc:
+        print(f"stripe {args.action}: {exc}")
+        return 1
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m quota")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -289,6 +304,12 @@ def main(argv=None) -> int:
     elastic.add_argument("path", nargs="?", help="ingest: the messages JSONL")
     elastic.add_argument("--seed", type=int, default=7)
     elastic.set_defaults(fn=cmd_elastic)
+
+    stripe_cmd = sub.add_parser("stripe", help="split payouts in a Stripe sandbox: Connect for partners (CUA_TASKS C6)")
+    stripe_cmd.add_argument("action", choices=["connect-setup", "orbit-split"],
+                            help="connect-setup: connected accounts for the roster's partners; "
+                                 "orbit-split: the Orbit Analytics payment and Northstar's transfer")
+    stripe_cmd.set_defaults(fn=cmd_stripe)
 
     serve = sub.add_parser("serve", help="serve the API and screens over one running world")
     serve.add_argument("--world", choices=["acme", "fernhill"], default="acme")

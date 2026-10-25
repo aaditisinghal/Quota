@@ -20,3 +20,6 @@ runs/
 # R6 exports and backtest output (python -m quota export / backtest)
 inbox/
 out/
+
+# C6 Stripe Connect sandbox account ids (python -m quota stripe connect-setup)
+.stripe_accounts.json

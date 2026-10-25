@@ -29,7 +29,7 @@ const TABS: [Tab, string][] = [
 // and the Stripe test sandbox with the Orbit split's Connect transfer (C6).
 const EXTERNAL: [string, string, string][] = [
   ["BambooHR", "http://127.0.0.1:8080/employees/directory.php", "The HR clone with Quota's people (run start-clone.cmd)"],
-  ["Stripe sandbox", "https://dashboard.stripe.com/test/connect/accounts/overview", "Stripe test mode: connected partners and transfers"],
+  ["Stripe sandbox", "https://dashboard.stripe.com/acct_1UTwgbGDis24t23a/test/connect/accounts/overview", "Stripe test mode: connected partners and transfers"],
 ];
 // The CFO screens and the Case tab use the whole width; the others keep the Timeline on the right.
 const WIDE: Tab[] = ["home", "case", "reps"];
