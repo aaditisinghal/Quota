@@ -182,3 +182,8 @@ a.segment:not([href]) { cursor: default; }
 
 .calibrate-link { display: inline-block; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); text-decoration: none; border-bottom: 1px dotted var(--ink-3); }
 .calibrate-link:hover { color: var(--ink); border-bottom-style: solid; }
+
+/* links out to the source systems, at the right end of the nav */
+.tabs .nav-external { margin-left: auto; display: flex; gap: 6px; align-items: center; padding: 6px 0; }
+.tabs .ext-link { font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; text-decoration: none; color: var(--ink-2); background: var(--panel); white-space: nowrap; }
+.tabs .ext-link:hover { border-color: var(--ink-3); color: var(--ink); }

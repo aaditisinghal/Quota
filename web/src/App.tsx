@@ -25,6 +25,12 @@ const TABS: [Tab, string][] = [
   ["inject", "Inject + Scorecard"],
   ["intake", "Intake"],
 ];
+// The source systems themselves, opened in a new tab: the HR clone seeded with Quota's roster (CUA_TASKS C1)
+// and the Stripe test sandbox with the Orbit split's Connect transfer (C6).
+const EXTERNAL: [string, string, string][] = [
+  ["BambooHR", "http://127.0.0.1:8080/employees/directory.php", "The HR clone with Quota's people (run start-clone.cmd)"],
+  ["Stripe sandbox", "https://dashboard.stripe.com/test/connect/accounts/overview", "Stripe test mode: connected partners and transfers"],
+];
 // The CFO screens and the Case tab use the whole width; the others keep the Timeline on the right.
 const WIDE: Tab[] = ["home", "case", "reps"];
 
@@ -222,6 +228,13 @@ export function App() {
             {label}
           </a>
         ))}
+        <span className="nav-external">
+          {EXTERNAL.map(([label, href, title]) => (
+            <a key={label} className="ext-link" href={href} target="_blank" rel="noreferrer" title={title}>
+              {label} ↗
+            </a>
+          ))}
+        </span>
       </nav>
       <div className={`body ${WIDE.includes(tab) ? "wide" : ""}`}>
         <main>
