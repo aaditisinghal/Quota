@@ -1,4 +1,4 @@
-# Quota
+# <img src="docs/logo.png" alt="" width="36" height="36" align="center" /> Quota
 
 An agent-run commissions desk for a simulated SaaS company. Two seats (a commissions analyst and a
 deferred-commission accountant) pick events off their own queues, read sources through a read-only connection,

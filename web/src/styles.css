@@ -53,7 +53,7 @@ a.money { text-decoration: none; border-bottom: 1px solid var(--ink-3); font-var
 .top { display: flex; align-items: center; gap: 24px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
 .brand { display: flex; gap: 10px; align-items: center; }
 .brand h1 { font-size: 18px; }
-.logo { width: 30px; height: 30px; border-radius: 7px; background: var(--ink); color: var(--paper); display: grid; place-items: center; font-weight: 700; }
+.logo { width: 30px; height: 30px; display: block; }
 .clock { display: flex; flex-direction: column; margin-left: auto; text-align: right; }
 .clock strong { font-family: var(--mono); font-size: 15px; }
 .tabs { display: flex; gap: 2px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); overflow-x: auto; }

@@ -196,7 +196,7 @@ export function App() {
     <div className={`app ${presenting ? "presenting" : ""}`}>
       <header className="top">
         <div className="brand">
-          <span className="logo">Q</span>
+          <img className="logo" src="./logo.png" alt="Quota" width="30" height="30" />
           <div>
             <h1>Quota</h1>
             <span className="muted">
