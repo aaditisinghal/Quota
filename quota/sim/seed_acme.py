@@ -3,7 +3,9 @@
 from pathlib import Path
 
 from quota import config
+from quota.engine import calculator
 from quota.engine.plans import load_plan_raw
+from quota.ledger import queries
 from quota.money import fmt_usd
 
 SEED = "seed"
@@ -37,6 +39,26 @@ def _contract(deal_id, acv_cents, term, contract_date, countersigned_at, clauses
 def _esign(event, at):
     return {"id": f"ENV-ACME-001-{event}", "envelope_id": "ENV-ACME-001", "deal_id": "acme", "event": event,
             "at": at}
+
+
+def opening_line(wp, clock, emit, deal_id) -> str:
+    """R3: the ledger starts in April, so Q1 history enters as paid opening lines with no journal entries. Each
+    is a replayable commission calc (kind opening_balance), so a later recompute of Q1 has every line."""
+    rows = queries.commission_rows(wp.conn, "jordan.kim", clock.now())
+    calc = calculator.commission_decision(rows, deal_id, "jordan.kim", clock.now())
+    decision_id = wp.record_decision(SEED, "opening_balance", f"{deal_id}/jordan.kim", queries.input_refs(rows),
+                                     calc["resolutions"], calc["precedent_ids"], calc["output"], "drafted",
+                                     f"opening balance: {deal_id} {calc['result'].quarter} {calc['result'].tier} tier "
+                                     f"{fmt_usd(calc['result'].amount_cents)}, paid before the ledger starts",
+                                     decision_id=f"D-OB-{deal_id}")
+    r = calc["result"]
+    line_id = wp.add_commission_line(SEED, {
+        "rep_id": "jordan.kim", "deal_id": deal_id, "booking_quarter": r.quarter, "credit_cents": r.credit_cents,
+        "base_portion_cents": r.base_portion_cents, "accel_portion_cents": r.accel_portion_cents,
+        "amount_cents": r.amount_cents, "status": "paid"}, decision_id, line_id=f"CL-OB-{deal_id}")
+    emit(SEED, "ENTRY", f"{line_id} opening line {deal_id}/jordan.kim {r.quarter} {fmt_usd(r.amount_cents)} paid "
+                        f"({decision_id}; no journal entry, the ledger starts in April)")
+    return line_id
 
 
 def seed(wp, clock, emit) -> None:
@@ -82,7 +104,8 @@ def seed(wp, clock, emit) -> None:
         wp.append_fact("contracts", _contract(deal_id, cents, term, close, countersigned, {},
                                               f"contracts/{deal_id}-msa.pdf"), SEED)
         emit(SEED, "FACT", f"{deal_id} ({account}) {fmt_usd(cents)}, {term} months, countersigned "
-                           f"{countersigned} (Q1 history, facts only)")
+                           f"{countersigned} (Q1 history)")
+        opening_line(wp, clock, emit, deal_id)
 
     clock.advance_to("2026-03-31T22:00:00Z")
     wp.append_fact("esign_events", _esign("sent", clock.now()), SEED)

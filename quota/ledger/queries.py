@@ -237,6 +237,9 @@ def _recompute(fn, rows, decision, stored_args) -> dict:
         return disputes.dispute_decision(rows, subject, now, claim=claim)["output"]
     if fn == "void_entry":
         return entries.void_decision(rows, subject, now)["output"]
+    if fn == "true_up_entry":
+        from quota.engine import recompute
+        return recompute.true_up_entry(rows, **stored_args)
     from quota.engine.checks import CHECKS
     if fn in CHECKS:
         return CHECKS[fn](rows, **stored_args)

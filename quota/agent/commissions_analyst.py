@@ -873,23 +873,50 @@ class CommissionsAnalyst(Seat):
     # ---------- the rep's side of a recovery (churn clawback, voided deal) ----------
 
     def pending_recoveries(self) -> list[tuple[dict, dict]]:
-        """Recoverable clawback / void decisions whose line has no negative correcting line yet."""
-        corrected = {l["corrects_id"] for l in self.lines() if l["amount_cents"] < 0}
+        """Recoverable clawback / void decisions whose line has no negative correcting line yet (a quarter
+        true-up's line corrects the same line but is not its recovery)."""
+        reversals = {d["id"] for kind in ("clawback", "void_reversal") for d in self.decisions(kind=kind)}
+        corrected = {l["corrects_id"] for l in self.lines() if l["amount_cents"] < 0 and l["decision_id"] in reversals}
         return [(d, self.get("commission_lines", d["subject_id"]))
                 for kind in ("clawback", "void_reversal") for d in self.decisions(kind=kind)
                 if json.loads(d["output_json"])["args"]["recoverable"] and d["subject_id"] not in corrected]
 
+    def true_ups_of(self, line_id) -> list[dict]:
+        decided = {d["id"] for d in self.decisions(kind="true_up")}
+        return [l for l in self.lines() if l["corrects_id"] == line_id and l["decision_id"] in decided]
+
     def write_recoveries(self, recoveries) -> list[str]:
         for decision, line in recoveries:
+            # What the rep holds now: the line plus any quarter true-ups already taken back (R3).
+            net = {k: line[k] + sum(t[k] for t in self.true_ups_of(line["id"]))
+                   for k in ("credit_cents", "base_portion_cents", "accel_portion_cents", "amount_cents")}
             recovery = self.wp.add_commission_line(self.principal, {
                 "rep_id": line["rep_id"], "deal_id": line["deal_id"], "booking_quarter": line["booking_quarter"],
-                "credit_cents": -line["credit_cents"], "base_portion_cents": -line["base_portion_cents"],
-                "accel_portion_cents": -line["accel_portion_cents"], "amount_cents": -line["amount_cents"]},
-                decision["id"], corrects_id=line["id"])
-            self.emit("ENTRY", f"{recovery} {decision['kind'].replace('_', ' ')} line {fmt_usd(-line['amount_cents'])}"
+                **{k: -v for k, v in net.items()}}, decision["id"], corrects_id=line["id"])
+            self.emit("ENTRY", f"{recovery} {decision['kind'].replace('_', ' ')} line {fmt_usd(-net['amount_cents'])}"
                                f", corrects {line['id']} ({decision['id']})")
             self.wp.set_line_status(self.principal, line["id"], "clawed_back")
             self.emit("ENTRY", f"{line['id']} -> clawed_back")
+        return self.write_true_up_lines()
+
+    def write_true_up_lines(self) -> list[str]:
+        """R3: the rep's side of a quarter recompute. A recovered decrease or an increase becomes a correcting line
+        for the difference (an unrecoverable decrease has none: the rep keeps it, and the Controller was told)."""
+        written = {l["decision_id"] for l in self.lines()}
+        for decision in self.decisions(kind="true_up"):
+            r = json.loads(decision["output_json"])["result"]
+            if decision["id"] in written or r["delta"] is None or (r["delta"]["delta_cents"] < 0 and not r["entry"]):
+                continue
+            line = self.get("commission_lines", decision["subject_id"])
+            held = [line, *self.true_ups_of(line["id"])]
+            portions = {k: r["recomputed"][k] - sum(l[k] for l in held)
+                        for k in ("base_portion_cents", "accel_portion_cents")}
+            correcting = self.wp.add_commission_line(self.principal, {
+                "rep_id": line["rep_id"], "deal_id": line["deal_id"], "booking_quarter": line["booking_quarter"],
+                "credit_cents": 0, **portions, "amount_cents": r["delta"]["delta_cents"]},
+                decision["id"], corrects_id=line["id"])
+            self.emit("ENTRY", f"{correcting} true-up line {signed(r['delta']['delta_cents'])}, corrects {line['id']} "
+                               f"({decision['id']})")
         return []
 
     def reconcile_clawback_lines(self, ctx):

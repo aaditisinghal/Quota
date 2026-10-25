@@ -14,7 +14,7 @@ def test_replay_matches(acme_demo):
 
 def test_every_decision_replays(acme_demo):
     ids = [r["id"] for r in queries.fetch_all(acme_demo.ro, "SELECT id FROM decisions ORDER BY id")]
-    assert ids == [f"D-000{n}" for n in range(1, 8)]
+    assert ids == [f"D-000{n}" for n in range(1, 8)] + ["D-OB-birch", "D-OB-cedar", "D-OB-delta"]   # R3 opening lines
     assert all(queries.replay_decision(acme_demo.ro, d)[0] for d in ids)
 
 

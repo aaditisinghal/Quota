@@ -129,7 +129,7 @@ def tie_outs(conn, t=None) -> list[dict]:
         for l in entry["lines"]:
             if kind == "amortization" and entry["status"] == "posted" and l["account"] == "6110":
                 amortized[l["subledger_ref"]] = amortized.get(l["subledger_ref"], 0) + l["debit_cents"]
-            if kind in ("clawback", "void_reversal") and entry["status"] != "posted" and l["account"] == "1350":
+            if kind in ("clawback", "void_reversal", "true_up") and entry["status"] != "posted" and l["account"] == "1350":
                 in_transit += l["credit_cents"]
     schedules = queries.fetch_all(conn, "SELECT * FROM amortization_schedules WHERE known_at <= ?",
                                   (t or queries.END_OF_TIME,))

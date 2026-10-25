@@ -38,10 +38,13 @@ class Ledger:
         authors = {m["id"]: m["author"] for m in queries.fetch_all(ro, "SELECT id, author FROM messages")}
         deal_ids = {d["id"] for d in queries.latest_rows(ro, "deals", queries.END_OF_TIME)}
         self.decisions = []
-        for d in queries.fetch_all(ro, "SELECT id, kind, subject_id, outcome, resolutions_json FROM decisions ORDER BY id"):
+        for d in queries.fetch_all(ro, "SELECT id, kind, subject_id, outcome, resolutions_json, output_json "
+                                       "FROM decisions ORDER BY id"):
             subject = d["subject_id"]
             deal = rep = author = None
-            if "/" in subject:
+            if d["kind"] == "true_up":      # R3: a quarter true-up belongs to the reversal that caused it
+                deal = queries.loads(d["output_json"])["args"]["caused_by"][0]
+            elif "/" in subject:
                 deal = subject.split("/")[0].split("+")[0]
             elif subject.startswith("CL-"):
                 deal = self.line_deal.get(subject)
@@ -87,6 +90,8 @@ def observe(ledger, case) -> dict:
     lines = [l for l in ledger.lines if l["deal_id"] in deals and (scope == "move" or l["rep_id"] == case["rep_id"])]
     signals = set()
     for d in related(ledger, case):
+        if d["kind"] == "true_up":     # R3: the quarter's other lines moved; the case itself was handled elsewhere
+            continue
         if d["outcome"] in FLAGS:
             signals.add(d["outcome"])
         if corrected(d):
