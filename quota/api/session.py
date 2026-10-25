@@ -98,10 +98,20 @@ class Session:
                 "timeline_length": len(self.world.feed), "principals": self.principals(),
                 "pending_approvals": [{"id": a["id"], "kind": a["kind"], "subject": a["subject_id"],
                                        "approver": a["approver"], "amount_cents": a["amount_cents"],
-                                       "since": a["known_at"]} for a in queries.pending_approvals(self.ro, now)],
+                                       "since": a["known_at"], "similar": self.similar(a["id"])}
+                                      for a in queries.pending_approvals(self.ro, now)],
                 "upcoming": [{"at": e.release_at, "type": e.type, "payload": e.payload}
                              for e in self.world.queue.upcoming()][:20],
                 "away": dict(getattr(self.world.people, "away", {}))}
+
+    def similar(self, approval_id) -> list[dict]:
+        """E7: the past decisions recalled for an approval (its root's, for a routed copy)."""
+        root = queries.fetch_one(self.ro, "SELECT * FROM approvals WHERE id = ?", (approval_id,))
+        while root and root["parent_id"]:
+            root = queries.fetch_one(self.ro, "SELECT * FROM approvals WHERE id = ?", (root["parent_id"],))
+        found = queries.fetch_one(self.ro, "SELECT output_json FROM decisions WHERE kind = 'precedent_recall' AND "
+                                           "subject_id = ? ORDER BY id DESC", (root["id"] if root else approval_id,))
+        return queries.loads(found["output_json"])["args"]["similar"] if found else []
 
     def messages(self, principal: str | None = None) -> list[dict]:
         rows = queries.fetch_all(self.ro, "SELECT * FROM messages ORDER BY known_at, id")

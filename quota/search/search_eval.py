@@ -35,7 +35,13 @@ def run(backend, key, corpus_size, out_dir="out") -> dict:
     for mode in modes:
         hits = found(backend, "hybrid" if mode == "local_bm25" else mode)
         rows[mode] = {"label": LABELS[mode], "mode": hits[0]["mode"] if hits else mode, **score(hits, key)}
-    result = {"backend": backend.name, "messages": corpus_size,
+    from quota.search import precedents
+    if backend.name == "elastic":
+        decisions = precedents.ElasticDecisions.library(backend.client)
+    else:
+        decisions = precedents.LocalDecisions(precedents.library_docs())
+    recall = precedents.recall_eval(decisions)
+    result = {"backend": backend.name, "messages": corpus_size, "precedent_recall": recall,
               "planted": sum(r["expected"] == "commitment" for r in key),
               "decoys": sum(r["expected"] == "not" for r in key), "k": 20, "intents": list(INTENTS), "modes": rows}
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -51,4 +57,8 @@ def table(result) -> list[str]:
     for row in result["modes"].values():
         lines.append(f"{row['label']:<22}{row['recall']}/{row['planted']:<9}{row['decoys_in_top20']:<17}"
                      f"{tick(row['multilingual']):<14}{tick(row['thread'])}")
+    r = result.get("precedent_recall")
+    if r:
+        lines.append(f"Precedent recall ({r['backend']}): hit@3 {r['hit_at_3']}/{r['requests']} reworded exception "
+                     f"requests")
     return lines

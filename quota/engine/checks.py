@@ -191,7 +191,14 @@ def check_commitments(rows, deal_id, findings) -> dict:
                        "reason_code": "OFF_CONTRACT_COMMITMENT" if open_ else None}}
 
 
+def check_precedent_recall(rows, approval_id, query, similar) -> dict:
+    """ELASTIC_TASKS E7: past decisions shown to an approver. Recorded so the card can be traced; never applied
+    (a policy matches only by its structured scope), so replay is the record itself."""
+    return {"fn": "check_precedent_recall", "args": {"approval_id": approval_id, "query": query, "similar": similar},
+            "result": {"shown": [s["id"] for s in similar], "applied": False}}
+
+
 CHECKS = {fn.__name__: fn for fn in (check_splits, check_backdating, check_collection, check_termination,
                                      check_territory, check_plan_drift, check_resubmission, check_precedent_pattern,
                                      check_no_rule, check_rep_exceptions, check_leave, check_short_pay,
-                                     check_commitments)}
+                                     check_commitments, check_precedent_recall)}

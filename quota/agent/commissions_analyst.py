@@ -470,7 +470,32 @@ class CommissionsAnalyst(Seat):
                               f"({c['granted'].quarter}) -> {approver}: delta {fmt_usd(c['delta'])} "
                               f"({fmt_usd(c['current'].amount_cents)} -> {fmt_usd(c['granted'].amount_cents)}), "
                               f"from {message['id']}")
-        return []
+        recall = self.precedent_recall(approval_id, message["text"])
+        return [recall] if recall else []
+
+    def precedent_recall(self, approval_id, text) -> str | None:
+        """E7: the three past decisions most like this request, for the approver's card. Only when the evidence
+        layer is on; never applied."""
+        if getattr(self.world, "evidence", None) is None:
+            return None
+        from quota.search import elastic_client, mirror, precedents
+        backend = None
+        if elastic_client.configured():
+            try:
+                backend = precedents.ElasticDecisions(elastic_client.es())
+                similar = backend.similar(text, exclude=(approval_id,))
+            except Exception:
+                backend = None
+        if backend is None:
+            similar = precedents.LocalDecisions(mirror.documents(self.ro)).similar(text, exclude=(approval_id,))
+        if not similar:
+            return None
+        rows = {"approvals": [self.get("approvals", approval_id)]}
+        output = checks.check_precedent_recall(rows, approval_id, text, similar)
+        shown = ", ".join(f"{s['id']} ({s['outcome']}, {s['approver']})" for s in similar)
+        decision_id = self.flag("precedent_recall", approval_id, rows, output, "posted",
+                                f"similar past decisions for {approval_id}: {shown}; shown to the approver, not applied")
+        return decision_id
 
     def write_already_granted(self, ctx):
         self.send(ctx.data["message"]["author"], f"That is already granted under {ctx.data['granted_by']}.", "REPLY")
