@@ -291,8 +291,13 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
             return flow().needs_you()
 
     def needs_you_answer(item_id: str, body: AnswerIn):
+        from quota.integrations import notify
         with session.lock:
-            return flow().answer(item_id, body.as_principal, body.decision, body.text)
+            item = next((i for i in flow().needs_you_items() if i["id"] == item_id), None)
+            out = flow().answer(item_id, body.as_principal, body.decision, body.text)
+        # The answer is recorded first; the email is a notice of it, sent outside the lock.
+        out["email"] = notify.send(notify.answer_email(item, item_id, body.as_principal, body.decision, body.text, out))
+        return out
 
     def home_kpis():
         with session.lock:

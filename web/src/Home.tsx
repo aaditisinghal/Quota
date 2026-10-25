@@ -177,6 +177,7 @@ type Outcome = {
   after: number; // the last inbox fetch started before the answer landed
   cleared: { id: string; name: string }[];
   routed: { id: string; name: string } | null;
+  email: { sent: boolean; to?: string; error?: string } | null; // the Resend notice of this answer
 };
 type Answered = { ok: true } | { ok: false; reason: string; codes: string[] };
 
@@ -346,7 +347,7 @@ export function NeedsYouInbox({ people, version, onChange, only }: { people: Pri
       return { ok: false, reason, codes };
     }
     const by = personName(person, people);
-    setResolved((prev) => ({ ...prev, [item.id]: { decision, comment: text, by, result, after: issued.current, cleared: [], routed: null } }));
+    setResolved((prev) => ({ ...prev, [item.id]: { decision, comment: text, by, result, after: issued.current, cleared: [], routed: null, email: res.email ?? null } }));
     const fresh = await load();
     if (fresh) {
       const open = new Map(fresh.people.flatMap((g) => g.items.map((i) => [i.id, g] as const)));
@@ -745,6 +746,11 @@ function Resolved({
         </blockquote>
       )}
       <p className={`nyx-result ${raw ? "raw" : ""}`}>{line}</p>
+      {outcome.email && (
+        <p className={`nyx-email ${outcome.email.sent ? "sent" : "failed"}`}>
+          {outcome.email.sent ? `✉ Emailed to ${outcome.email.to}` : `✉ Not emailed: ${outcome.email.error}`}
+        </p>
+      )}
       {pending && <p className="nyx-cleared">Still open: {item.answer === "reply" ? "it clears on the next check" : `it waits on a decision from ${outcome.by}`}.</p>}
       {outcome.cleared.length > 0 && (
         <p className="nyx-cleared">

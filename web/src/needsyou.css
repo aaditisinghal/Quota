@@ -203,3 +203,8 @@
   .nyx-card .nyx-kbd { display: none; }
   .nyx-card .nyx-amount .money { font-size: 17px; }
 }
+
+/* the Resend notice of an answer */
+.nyx-email { font-size: 12.5px; margin: 6px 0 0; }
+.nyx-email.sent { color: var(--ok, #1a7f37); }
+.nyx-email.failed { color: var(--bad, #b42318); }

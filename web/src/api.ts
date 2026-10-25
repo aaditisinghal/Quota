@@ -462,7 +462,7 @@ export const api = {
   calibration: (line: string) => call<Calibration>(`/lines/${seg(line)}/calibration`),
   needsYou: () => call<NeedsYou>("/needs-you"),
   answer: (id: string, as_principal: string, decision: "approve" | "reject" | "reply", text: string) =>
-    call<{ id: string; ok: boolean; result?: unknown; refused?: unknown }>(`/needs-you/${seg(id)}/answer`, { as_principal, decision, text }),
+    call<{ id: string; ok: boolean; result?: unknown; refused?: unknown; email?: { sent: boolean; to?: string; error?: string } }>(`/needs-you/${seg(id)}/answer`, { as_principal, decision, text }),
   state: () => call<WorldState>("/state"),
   timeline: (since: number) => call<{ clock: string; items: TimelineItem[] }>(`/timeline?since=${since}`),
   trace: (id: string, asOf: string | null) =>
