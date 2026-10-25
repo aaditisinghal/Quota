@@ -23,6 +23,15 @@ def test_quarter_of():
                                     "2026-12-31T00:00:00Z")] == ["2026Q1", "2026Q1", "2026Q2", "2026Q4"]
 
 
+def test_quarters_close_in_company_time():
+    # R1: 8:30 pm Pacific on March 31 is still Q1, though it is April 1 in UTC.
+    assert quarter_of("2026-04-01T03:30:00Z") == "2026Q1"
+    assert quarter_of("2026-04-02T17:14:00Z") == "2026Q2"              # Acme: 10:14 am Pacific on April 2
+    assert quarter_of("2026-03-31") == "2026Q1"                         # plain dates are already local
+    from quota import clock as clk
+    assert clk.period_of("2026-05-01T05:00:00Z") == "2026-04"           # 10 pm Pacific, April 30
+
+
 def test_acme_q2_base(plan):
     r = calc_commission(plan, ACME_Q2, 0)
     assert (r.quarter, r.amount_cents, r.tier) == ("2026Q2", 1_200_000, "base")

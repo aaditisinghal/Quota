@@ -20,7 +20,7 @@ WRITE_METHODS = {"record_decision", "add_commission_line", "set_line_status", "d
 def test_every_decision_comes_from_an_event_its_seat_picked_up(acme_demo):
     ro = acme_demo.ro
     handled = queries.fetch_all(ro, "SELECT * FROM event_status WHERE status = 'handled'")
-    for decision in queries.fetch_all(ro, "SELECT * FROM decisions"):
+    for decision in queries.fetch_all(ro, "SELECT * FROM decisions WHERE seat != 'seed'"):   # R3 opening lines
         assert any(h["actor"] == decision["seat"] and h["known_at"] == decision["known_at"] for h in handled), \
             decision["id"]
     world = acme_demo.world
@@ -96,7 +96,8 @@ def test_ungrounded_claim_gets_one_clarifying_question():
     demo.world.settle()
     replies = queries.fetch_all(demo.ro, "SELECT * FROM messages WHERE author = ?", (ANALYST,))
     assert len(replies) == 1 and "2026-03-15 is not written in the quote" in replies[0]["text"]
-    assert [d["kind"] for d in queries.fetch_all(demo.ro, "SELECT kind FROM decisions")] == ["commission_calc"]
+    assert [d["kind"] for d in queries.fetch_all(demo.ro, "SELECT kind FROM decisions WHERE seat != 'seed'")] == [
+        "commission_calc"]
     demo.close()
 
 
@@ -136,7 +137,8 @@ def test_dispute_is_conceded_and_corrected_when_the_sources_say_quota_was_wrong(
     demo.world.api.message("jordan.kim", ANALYST, text)
     demo.world.settle()
     ro = demo.ro
-    kinds = [(d["kind"], d["outcome"]) for d in queries.fetch_all(ro, "SELECT * FROM decisions ORDER BY id")]
+    kinds = [(d["kind"], d["outcome"]) for d in queries.fetch_all(ro, "SELECT * FROM decisions WHERE seat != 'seed' "
+                                                                      "ORDER BY id")]
     assert kinds == [("commission_calc", "drafted"), ("dispute", "conceded"), ("commission_calc", "drafted")]
     corrected = queries.fetch_one(ro, "SELECT * FROM commission_lines WHERE corrects_id = 'CL-0001'")
     assert (corrected["booking_quarter"], corrected["amount_cents"]) == ("2026Q1", 1_800_000)

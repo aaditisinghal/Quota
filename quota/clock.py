@@ -1,10 +1,14 @@
 """SimClock plus the date, period and quarter helpers everything else uses.
 
-Timestamps are ISO-8601 UTC strings with Z (2026-04-02T17:14:00Z), so string order is time order.
+Timestamps are ISO-8601 UTC strings with Z (2026-04-02T17:14:00Z), so string order is time order. Dates,
+periods and quarters are in company time (config.COMPANY_TZ): 8:30 pm Pacific on March 31 is still Q1, though it
+is April 1 in UTC. Plain dates (YYYY-MM-DD) are already local.
 """
 
 import calendar
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -15,6 +19,22 @@ def parse_ts(ts: str) -> datetime:
 
 def fmt_ts(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime(TS_FORMAT)
+
+
+@lru_cache(maxsize=1)
+def _company_tz():
+    from quota import config
+    return ZoneInfo(config.COMPANY_TZ)
+
+
+@lru_cache(maxsize=65536)
+def local_date(date_or_ts: str) -> str:
+    """The company-time calendar date of a timestamp; a plain date is returned as it is. A timestamp exactly on
+    a UTC day boundary (T00:00:00Z or T23:59:59Z) is a plain date stretched to a timestamp by start_of_day /
+    end_of_day (a contract date, a CRM close date, an asserted booking date), so it keeps its own date."""
+    if "T" not in date_or_ts or date_or_ts[10:] in ("T00:00:00Z", "T23:59:59Z"):
+        return date_or_ts[:10]
+    return parse_ts(date_or_ts).astimezone(_company_tz()).strftime("%Y-%m-%d")
 
 
 def start_of_day(date: str) -> str:
@@ -31,7 +51,7 @@ def in_window(effective_from: str, expires_at: str, now: str) -> bool:
 
 
 def period_of(date_or_ts: str) -> str:
-    return date_or_ts[:7]
+    return local_date(date_or_ts)[:7]
 
 
 def add_periods(period: str, n: int) -> str:

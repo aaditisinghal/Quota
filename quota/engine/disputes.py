@@ -45,8 +45,8 @@ def _prior_value(prior_decision, field):
 
 
 def _matches(field, resolved, asserted) -> bool:
-    if field == "booking_date":   # asserted may be a day (2026-03-31) or a month (2026-03)
-        return resolved is not None and asserted is not None and str(resolved).startswith(str(asserted))
+    if field == "booking_date":   # asserted may be a day (2026-03-31) or a month (2026-03), in company time (R1)
+        return resolved is not None and asserted is not None and clk.local_date(str(resolved)).startswith(str(asserted))
     return resolved == asserted
 
 

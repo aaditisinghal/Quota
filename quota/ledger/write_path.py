@@ -193,14 +193,14 @@ class WritePath:
     # ---------- decisions ----------
 
     def record_decision(self, actor, kind, subject_id, inputs, resolutions, precedent_ids, output, outcome,
-                        explanation, model=None, prompt_sha=None) -> str:
+                        explanation, model=None, prompt_sha=None, decision_id=None) -> str:
         codes = self._codes(actor, "record:decision")
         required = {"table", "id", "version", "sha256"}
         if not inputs or any(not required <= set(i) for i in inputs):
             codes.append("INV4_NO_DECISION")
         self._check(actor, "record_decision", subject_id, codes, f"{kind} decision needs non-empty inputs")
         with self.conn:
-            decision_id = self._next_id("decisions")
+            decision_id = decision_id or self._next_id("decisions")
             self._insert("decisions", {
                 "id": decision_id, "seat": actor, "kind": kind, "subject_id": subject_id,
                 "inputs_json": json.dumps(inputs, sort_keys=True),
@@ -214,7 +214,10 @@ class WritePath:
 
     # ---------- commission lines ----------
 
-    def add_commission_line(self, actor, line: dict, decision_id: str, corrects_id: str | None = None) -> str:
+    def add_commission_line(self, actor, line: dict, decision_id: str, corrects_id: str | None = None,
+                            line_id: str | None = None) -> str:
+        """`line_id` is given only for opening balances (CL-OB-<deal>), so the ledger's own numbering is not
+        shifted by history."""
         codes = self._codes(actor, "draft:commission_line")
         posting_period = clk.period_of(self.clock.now())
         if queries.period_locked(self.conn, posting_period, self.clock.now()):
@@ -229,7 +232,7 @@ class WritePath:
             raise KeyError(f"unknown commission line {corrects_id}")
         status = line.get("status", "draft")
         with self.conn:
-            line_id = self._next_id("commission_lines")
+            line_id = line_id or self._next_id("commission_lines")
             self._insert("commission_lines", {
                 "id": line_id, "rep_id": line["rep_id"], "deal_id": line["deal_id"],
                 "booking_quarter": line["booking_quarter"], "credit_cents": line["credit_cents"],
@@ -467,7 +470,7 @@ class WritePath:
             codes.append("INV6_PAYROLL_MISMATCH")
         if queries.satisfied_approval(self.conn, "payroll_file", file_id, self.clock.now()) is None:
             codes.append("INV5_NOT_APPROVED")
-        today = self.clock.now()[:10]
+        today = clk.local_date(self.clock.now())
         if queries.period_locked(self.conn, clk.period_of(today), self.clock.now()):
             codes.append("INV2_PERIOD_LOCKED")
         self._check(actor, "release_payroll", file_id, codes,

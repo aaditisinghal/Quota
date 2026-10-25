@@ -56,7 +56,9 @@ def test_a_rep_statement_shows_attainment_and_lines_by_quarter():
         statement = client.get("/statement/jordan.kim?as_principal=jordan.kim").json()
         q1 = next(q for q in statement["quarters"] if q["quarter"] == "2026Q1")
         assert q1["attainment_bps"] == 10000                  # restated to 100% after the clawback, as the cascade says
-        assert {l["id"]: l["status"] for l in q1["lines"]} == {"CL-0002": "clawed_back", "CL-0003": "approved"}
+        assert {l["id"]: l["status"] for l in q1["lines"]} == {"CL-OB-birch": "paid", "CL-OB-cedar": "paid",
+                                                           "CL-OB-delta": "paid", "CL-0002": "clawed_back",
+                                                           "CL-0003": "approved"}
         assert client.get("/statement/jordan.kim?as_principal=priya.nair").status_code == 200
     finally:
         demo.close()

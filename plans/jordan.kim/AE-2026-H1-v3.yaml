@@ -15,5 +15,10 @@ spiffs: []
 pay_on: collection
 collection_hold_days: 90
 clawback: {window_months: 6, triggers: [churn, termination_for_convenience, full_refund], basis: full}
+# California (Labor Code 2751): commissions are advances until earned, and the signed plan says how an
+# unearned advance is recovered.
+earned_when: [customer_paid, clawback_window_elapsed]
+chargeback_method: future_advances
+true_up_on_recompute: true
 termination: {pay_if_booked_and_collected_before: end_date}
 manager_override: {rate: 0.02, manager: morgan.diaz}   # ignored in Phase 1

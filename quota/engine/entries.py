@@ -92,7 +92,7 @@ def clawback_entry(line, total, amortized, date, recoverable: bool, kind="clawba
 
 def is_recoverable(plan: Plan, booking_date: str, churn_date: str, trigger: str) -> bool:
     return (plan.clawback_window_months is not None and plan.signed_at is not None
-            and churn_date <= clk.add_months(booking_date[:10], plan.clawback_window_months)
+            and churn_date <= clk.add_months(clk.local_date(booking_date), plan.clawback_window_months)
             and trigger in plan.clawback_triggers)
 
 
@@ -120,37 +120,71 @@ def accrual_decision(rows, line_id, now) -> dict:
             "resolutions": {}, "precedent_ids": []}
 
 
+def chargeback_code(plan: Plan, rep: dict | None, earned: bool) -> str | None:
+    """R2: commissions are advances until earned. An unearned advance is recovered (a 1290 receivable, netted
+    against future advances) only if the signed plan says so and the rep still works here."""
+    if plan.raw.get("chargeback_method") != "future_advances" or earned:
+        return "CHARGEBACK_NOT_PERMITTED"
+    if rep is not None and rep.get("end_date"):
+        return "CHARGEBACK_REP_TERMINATED"
+    return None
+
+
+def _rep(rows, rep_id):
+    return next((p for p in rows.get("people", []) if p["id"] == rep_id), None)
+
+
+def net_cents(rows, line) -> int:
+    """What a line pays now: its amount plus any quarter true-ups on record that correct it (R3)."""
+    return line["amount_cents"] + sum(l["amount_cents"] for l in rows.get("commission_lines", [])
+                                      if l.get("corrects_id") == line["id"] and l["id"] != line["id"])
+
+
+def expensed_reversal(line, total, date, recoverable, kind):
+    """A line expensed when incurred (term <= 12 months): recover it from 6115, or nothing to book."""
+    if not recoverable:
+        return None
+    return _entry(kind, date, f"{line['id']} recover from rep",
+                  [_line("1290", debit=total, ref=line["rep_id"]), _line("6115", credit=total, ref=line["id"])])
+
+
 def clawback_decision(rows, line_id, now) -> dict:
     line = _find(rows, "commission_lines", line_id)
     deal = _find(rows, "deals", line["deal_id"])
     contract = contract_for(rows, deal["id"])
     booking = ranking.resolve_booking(deal, contract, rows.get("esign_events", []), rows.get("precedents", []), now)
-    booking_date = booking.value[:10]
+    booking_date = clk.local_date(booking.value)
     plan = plan_for(rows, line["rep_id"], booking_date)
     churn = next(e for e in rows.get("events", []) if e["type"] == "customer.churned"
                  and json.loads(e["payload_json"])["deal_id"] == deal["id"])
     payload = json.loads(churn["payload_json"])
     churn_date, trigger = payload["effective_date"], payload.get("reason") or "churn"
-    schedule_row = next(s for s in rows.get("amortization_schedules", [])
-                        if s["line_id"] == line_id and s["status"] == "active")
-    amortized = amortization.amortized_through(json.loads(schedule_row["schedule_json"]), clk.period_of(churn_date))
-    recoverable = is_recoverable(plan, booking_date, churn_date, trigger)
+    schedule_row = next((s for s in rows.get("amortization_schedules", [])
+                         if s["line_id"] == line_id and s["status"] == "active"), None)
+    total = net_cents(rows, line)
+    # Amortization taken so far is what the schedule no longer holds (a trued-up schedule holds less, R3).
+    amortized = (total - amortization.remaining_after(json.loads(schedule_row["schedule_json"]),
+                                                      clk.period_of(churn_date)) if schedule_row else None)
+    by_clause = is_recoverable(plan, booking_date, churn_date, trigger)   # the signed clause covers this churn
+    code = chargeback_code(plan, _rep(rows, line["rep_id"]), earned=not by_clause)
+    recoverable = code is None
     window_end = (clk.add_months(booking_date, plan.clawback_window_months)
                   if plan.clawback_window_months is not None else None)
-    entry = clawback_entry(line, line["amount_cents"], amortized, churn_date, recoverable)
+    entry = (clawback_entry(line, total, amortized, churn_date, recoverable) if schedule_row
+             else expensed_reversal(line, total, churn_date, recoverable, "clawback"))
     output = {
         "fn": "clawback_entry",
-        "args": {"line_id": line_id, "total_cents": line["amount_cents"], "amortized_cents": amortized,
+        "args": {"line_id": line_id, "total_cents": total, "amortized_cents": amortized,
                  "date": churn_date, "recoverable": recoverable, "booking_date": booking_date,
                  "churn_date": churn_date, "trigger": trigger, "window_end": window_end,
-                 "window_months": plan.clawback_window_months,
+                 "window_months": plan.clawback_window_months, "chargeback_code": code,
                  "plan": {"id": plan.plan_id, "version": plan.version, "signed_at": plan.signed_at}},
         "result": entry,
     }
     return {"output": output, "entry": entry, "recoverable": recoverable, "booking": booking,
             "resolutions": {"booking_date": ranking.to_dict(booking)},
             "precedent_ids": [booking.source.split(":", 1)[1]] if booking.basis == "precedent" else [],
-            "schedule_id": schedule_row["id"]}
+            "schedule_id": schedule_row["id"] if schedule_row else None}
 
 
 def void_decision(rows, line_id, now) -> dict:
@@ -159,20 +193,24 @@ def void_decision(rows, line_id, now) -> dict:
     before the void month is reversed with the unamortized asset."""
     line = _find(rows, "commission_lines", line_id)
     deal = _find(rows, "deals", line["deal_id"])
-    void_date = deal["known_at"][:10]
+    void_date = clk.local_date(deal["known_at"])
+    # R2 applies only when the plan and the rep are on record (older decisions recorded neither).
+    code = None
+    if rows.get("plans"):
+        code = chargeback_code(plan_for(rows, line["rep_id"], void_date), _rep(rows, line["rep_id"]), earned=False)
+    recoverable = code is None
     schedules = [s for s in rows.get("amortization_schedules", []) if s["line_id"] == line_id and s["status"] == "active"]
+    total = net_cents(rows, line)
     if schedules:
-        amortized = amortization.amortized_through(json.loads(schedules[0]["schedule_json"]),
-                                                   clk.add_periods(clk.period_of(void_date), -1))
-        entry = clawback_entry(line, line["amount_cents"], amortized, void_date, True, kind="void_reversal")
-    else:   # expensed when incurred (term <= 12 months): recover it from 6115
-        amortized = None
-        entry = _entry("void_reversal", void_date, f"{line_id} recover from rep",
-                       [_line("1290", debit=line["amount_cents"], ref=line["rep_id"]),
-                        _line("6115", credit=line["amount_cents"], ref=line_id)])
+        amortized = total - amortization.remaining_after(json.loads(schedules[0]["schedule_json"]),
+                                                         clk.add_periods(clk.period_of(void_date), -1))
+        entry = clawback_entry(line, total, amortized, void_date, recoverable, kind="void_reversal")
+    else:   # expensed when incurred; already expensed and not recoverable: nothing to book, only the escalation
+        amortized, entry = None, expensed_reversal(line, total, void_date, recoverable, "void_reversal")
     output = {"fn": "void_entry",
-              "args": {"line_id": line_id, "total_cents": line["amount_cents"], "amortized_cents": amortized,
-                       "date": void_date, "recoverable": True, "stage": deal["stage"]},
+              "args": {"line_id": line_id, "total_cents": total, "amortized_cents": amortized,
+                       "date": void_date, "recoverable": recoverable, "stage": deal["stage"],
+                       "chargeback_code": code},
               "result": entry}
     return {"output": output, "entry": entry, "resolutions": {}, "precedent_ids": [],
             "schedule_id": schedules[0]["id"] if schedules else None}

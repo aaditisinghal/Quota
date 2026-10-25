@@ -162,7 +162,8 @@ class CommissionsAnalyst(Seat):
         reps = sorted({r["rep_id"] for r in queries.fetch_all(self.ro, "SELECT rep_id FROM plans WHERE known_at <= ?",
                                                               (self.now,))})
         ctx.data["rows"] = {rep: queries.commission_rows(self.ro, rep, self.now) for rep in reps}
-        ctx.data["lined"] = {d["subject_id"] for d in self.decisions(kind="commission_calc")}
+        ctx.data["lined"] = {d["subject_id"] for kind in ("commission_calc", "opening_balance")
+                             for d in self.decisions(kind=kind)}
         ctx.data["split_holds"] = {d["subject_id"] for d in self.decisions(kind="splits_check")}
         ctx.data["territory_holds"] = {d["subject_id"]: json.loads(d["output_json"])["args"]["target_rep"]
                                        for d in self.decisions(kind="territory_check")}
@@ -474,21 +475,40 @@ class CommissionsAnalyst(Seat):
     def decide_authority(self, ctx):
         return {"owner": routing.owner("plan_exception")}
 
+    def conflict_of(self, who, deal_id) -> str | None:
+        """Someone credited on the deal, or the manager of a rep who is, benefits from an exception on it."""
+        deal = self.get("deals", deal_id) if deal_id else None
+        if deal is None:
+            return None
+        for share in json.loads(deal["splits_json"]):
+            rep = self.get("people", share["rep"])
+            if share["rep"] == who:
+                return f"{config.display_name(who)} is credited on {deal['account']}"
+            if rep and rep["manager_id"] == who:
+                return (f"{config.display_name(who)} manages {config.display_name(share['rep'])}, who is credited on "
+                        f"{deal['account']}")
+        return None
+
     def write_authority(self, ctx):
         claim, message, owner = ctx.facts, ctx.data["message"], ctx.decision["owner"]
         author = config.display_name(message["author"])
+        conflict = self.conflict_of(message["author"], claim.deal_ref)
         text = (f"{claim.kind} from {message['author']} routed to {owner}: needs approve:plan_exception, which "
                 f"{message['author']} does not hold; nothing is paid on it")
+        if conflict:
+            text += f"; conflict of interest: {conflict}"
         rows = {"messages": [message]}
         decision_id = self.wp.record_decision(
             self.principal, "authority_check", message["id"], queries.input_refs(rows), {}, [],
             {"fn": "has_authority", "args": {"claim": claim.to_dict(), "author": message["author"]},
              "result": {"authorized": False, "routed_to": owner}}, "escalated", text)
         self.emit("DECISION", f"{decision_id} authority_check {message['id']}: {text}")
+        why = f" Conflict of interest: {conflict}, so it could not be theirs to grant in any case." if conflict else ""
         self.send(owner, f"{author} wrote \"{claim.quote}\" ({message['id']}). Only someone who can approve plan "
-                         f"exceptions can grant that, so nothing is paid on it. Do you want to grant it?")
+                         f"exceptions can grant that, so nothing is paid on it.{why} Do you want to grant it?")
         self.send(message["author"], f"I've asked {config.display_name(owner)} ({config.title(owner)}); this needs "
-                                     f"their approval before anything is paid.", "REPLY")
+                                     f"their approval before anything is paid."
+                                     + (f" You can't grant it yourself: {conflict}." if conflict else ""), "REPLY")
         return [decision_id]
 
     # someone asks the seat to approve or reject in chat: the write path is the judge, so try and report
@@ -568,9 +588,13 @@ class CommissionsAnalyst(Seat):
             self.emit("REFUSED", f"{refused.refusal_id} decide_approval {approval['id']}: "
                                  f"{', '.join(refused.reason_codes)}")
             approver = approval["approver"]
+            sender = (f" This came from {config.display_name(message['author'])}'s seat, so I read it as "
+                      f"{config.display_name(message['author'])}, whatever it says: approvals come only from "
+                      f"{config.display_name(approver)}'s own seat." if message["author"] != approver else "")
             self.send(message["author"], f"I can't decide {approval['id']}: {', '.join(refused.reason_codes)} "
                                          f"({refused.refusal_id}). It is waiting on {config.display_name(approver)} "
-                                         f"({config.title(approver)}), who decides it in the approval queue.", "REPLY")
+                                         f"({config.title(approver)}), who decides it in the approval queue.{sender}",
+                      "REPLY")
         return []
 
     # anything that did not survive extraction: one clarifying question, never the same one twice in a row
@@ -873,23 +897,50 @@ class CommissionsAnalyst(Seat):
     # ---------- the rep's side of a recovery (churn clawback, voided deal) ----------
 
     def pending_recoveries(self) -> list[tuple[dict, dict]]:
-        """Recoverable clawback / void decisions whose line has no negative correcting line yet."""
-        corrected = {l["corrects_id"] for l in self.lines() if l["amount_cents"] < 0}
+        """Recoverable clawback / void decisions whose line has no negative correcting line yet (a quarter
+        true-up's line corrects the same line but is not its recovery)."""
+        reversals = {d["id"] for kind in ("clawback", "void_reversal") for d in self.decisions(kind=kind)}
+        corrected = {l["corrects_id"] for l in self.lines() if l["amount_cents"] < 0 and l["decision_id"] in reversals}
         return [(d, self.get("commission_lines", d["subject_id"]))
                 for kind in ("clawback", "void_reversal") for d in self.decisions(kind=kind)
                 if json.loads(d["output_json"])["args"]["recoverable"] and d["subject_id"] not in corrected]
 
+    def true_ups_of(self, line_id) -> list[dict]:
+        decided = {d["id"] for d in self.decisions(kind="true_up")}
+        return [l for l in self.lines() if l["corrects_id"] == line_id and l["decision_id"] in decided]
+
     def write_recoveries(self, recoveries) -> list[str]:
         for decision, line in recoveries:
+            # What the rep holds now: the line plus any quarter true-ups already taken back (R3).
+            net = {k: line[k] + sum(t[k] for t in self.true_ups_of(line["id"]))
+                   for k in ("credit_cents", "base_portion_cents", "accel_portion_cents", "amount_cents")}
             recovery = self.wp.add_commission_line(self.principal, {
                 "rep_id": line["rep_id"], "deal_id": line["deal_id"], "booking_quarter": line["booking_quarter"],
-                "credit_cents": -line["credit_cents"], "base_portion_cents": -line["base_portion_cents"],
-                "accel_portion_cents": -line["accel_portion_cents"], "amount_cents": -line["amount_cents"]},
-                decision["id"], corrects_id=line["id"])
-            self.emit("ENTRY", f"{recovery} {decision['kind'].replace('_', ' ')} line {fmt_usd(-line['amount_cents'])}"
+                **{k: -v for k, v in net.items()}}, decision["id"], corrects_id=line["id"])
+            self.emit("ENTRY", f"{recovery} {decision['kind'].replace('_', ' ')} line {fmt_usd(-net['amount_cents'])}"
                                f", corrects {line['id']} ({decision['id']})")
             self.wp.set_line_status(self.principal, line["id"], "clawed_back")
             self.emit("ENTRY", f"{line['id']} -> clawed_back")
+        return self.write_true_up_lines()
+
+    def write_true_up_lines(self) -> list[str]:
+        """R3: the rep's side of a quarter recompute. A recovered decrease or an increase becomes a correcting line
+        for the difference (an unrecoverable decrease has none: the rep keeps it, and the Controller was told)."""
+        written = {l["decision_id"] for l in self.lines()}
+        for decision in self.decisions(kind="true_up"):
+            r = json.loads(decision["output_json"])["result"]
+            if decision["id"] in written or r["delta"] is None or (r["delta"]["delta_cents"] < 0 and not r["entry"]):
+                continue
+            line = self.get("commission_lines", decision["subject_id"])
+            held = [line, *self.true_ups_of(line["id"])]
+            portions = {k: r["recomputed"][k] - sum(l[k] for l in held)
+                        for k in ("base_portion_cents", "accel_portion_cents")}
+            correcting = self.wp.add_commission_line(self.principal, {
+                "rep_id": line["rep_id"], "deal_id": line["deal_id"], "booking_quarter": line["booking_quarter"],
+                "credit_cents": 0, **portions, "amount_cents": r["delta"]["delta_cents"]},
+                decision["id"], corrects_id=line["id"])
+            self.emit("ENTRY", f"{correcting} true-up line {signed(r['delta']['delta_cents'])}, corrects {line['id']} "
+                               f"({decision['id']})")
         return []
 
     def reconcile_clawback_lines(self, ctx):

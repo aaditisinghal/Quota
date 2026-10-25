@@ -129,7 +129,7 @@ def tie_outs(conn, t=None) -> list[dict]:
         for l in entry["lines"]:
             if kind == "amortization" and entry["status"] == "posted" and l["account"] == "6110":
                 amortized[l["subledger_ref"]] = amortized.get(l["subledger_ref"], 0) + l["debit_cents"]
-            if kind in ("clawback", "void_reversal") and entry["status"] != "posted" and l["account"] == "1350":
+            if kind in ("clawback", "void_reversal", "true_up") and entry["status"] != "posted" and l["account"] == "1350":
                 in_transit += l["credit_cents"]
     schedules = queries.fetch_all(conn, "SELECT * FROM amortization_schedules WHERE known_at <= ?",
                                   (t or queries.END_OF_TIME,))
@@ -143,7 +143,7 @@ def tie_outs(conn, t=None) -> list[dict]:
         ("Deferred commissions (1350)", "unamortized schedules + recoveries awaiting approval", _gl(tb, "1350"),
          remaining + in_transit),
         ("Commissions payable (2150)", "approved, unpaid commission lines", -_gl(tb, "2150"), payable),
-        ("Due from employees (1290)", "approved recovery lines", _gl(tb, "1290"), recoverable),
+        ("Commission advances recoverable (1290)", "approved recovery lines", _gl(tb, "1290"), recoverable),
         ("Accounts receivable (1200)", "invoices less payments in billing", _gl(tb, "1200"), receivable),
     ]
     return [{"name": n, "subledger": s, "gl_cents": g, "subledger_cents": v, "ok": g == v} for n, s, g, v in pairs]

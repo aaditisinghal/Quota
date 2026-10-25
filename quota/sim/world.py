@@ -153,7 +153,7 @@ class RecordsSystem:
         self._append("esign_events", {"id": f"ENV-{deal_id}-countersigned", "envelope_id": f"ENV-{deal_id}",
                                       "deal_id": deal_id, "event": "countersigned", "at": at})
         self._append("contracts", {"id": deal_id, "deal_id": deal_id, "acv_cents": p["acv_cents"],
-                                   "term_months": p["term_months"], "contract_date": at[:10], "countersigned_at": at,
+                                   "term_months": p["term_months"], "contract_date": clk.local_date(at), "countersigned_at": at,
                                    "clauses_json": p["clauses"], "doc_ref": f"contracts/{deal_id}-msa.pdf",
                                    "source": "esign"})
 

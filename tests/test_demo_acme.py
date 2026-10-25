@@ -55,7 +55,13 @@ def test_demo_ids_and_amounts(acme_demo):
         ("2026Q2", 1_200_000, None), ("2026Q1", 1_800_000, "CL-0001"), ("2026Q1", -1_800_000, "CL-0002")]
     assert [queries.line_status(ro, cl) for cl in lines] == ["superseded", "clawed_back", "approved"]
 
-    decisions = {d["id"]: d for d in queries.fetch_all(ro, "SELECT * FROM decisions ORDER BY id")}
+    # R3: Q1 history enters as paid opening lines (CL-OB-*, D-OB-*), outside the ledger's own numbering.
+    opening = queries.fetch_all(ro, "SELECT id, amount_cents FROM commission_lines WHERE id LIKE 'CL-OB-%' ORDER BY id")
+    assert [(l["id"], l["amount_cents"]) for l in opening] == [
+        ("CL-OB-birch", 1_000_000), ("CL-OB-cedar", 1_200_000), ("CL-OB-delta", 800_000)]
+    assert {queries.line_status(ro, l["id"]) for l in opening} == {"paid"}
+    decisions = {d["id"]: d for d in queries.fetch_all(
+        ro, "SELECT * FROM decisions WHERE kind != 'opening_balance' ORDER BY id")}
     assert [(d["kind"], d["outcome"]) for d in decisions.values()] == [
         ("commission_calc", "drafted"), ("dispute", "held"), ("dispute", "held"), ("escalation", "escalated"),
         ("commission_calc", "drafted"), ("commission_accrual", "drafted"), ("clawback", "escalated")]
