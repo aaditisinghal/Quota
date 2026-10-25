@@ -72,8 +72,10 @@ def documents(conn) -> list[dict]:
         output = _loads(d["output_json"])
         result = output.get("result") if isinstance(output.get("result"), dict) else {}
         code = output.get("reason_code") or result.get("reason_code") or d["kind"].upper()
+        # A dispute Quota "held" means it upheld its own answer; in the mirror, "held" means commission is held.
+        outcome = "upheld" if d["kind"] in ("dispute", "escalation") and d["outcome"] == "held" else d["outcome"]
         out.append({"id": d["id"], "kind": "decision", "seat": d["seat"], "subject_id": d["subject_id"],
-                    **ctx.about(d["subject_id"]), "approver": None, "outcome": d["outcome"], "reason_code": code,
+                    **ctx.about(d["subject_id"]), "approver": None, "outcome": outcome, "reason_code": code,
                     "reason_codes": [code],
                     "amount_cents": _amount(output, ctx.lines.get(d["subject_id"])) or opened.get(d["id"]),
                     "quarter": ctx.quarter(d["subject_id"], d["known_at"]), "known_at": d["known_at"],
