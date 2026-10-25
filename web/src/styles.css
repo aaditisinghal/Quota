@@ -319,3 +319,5 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 @keyframes flash { from { background: var(--mark); box-shadow: 0 0 0 3px var(--mark); } to { background: transparent; box-shadow: 0 0 0 3px transparent; } }
 .flash { animation: flash 600ms ease-out; border-radius: 3px; }
 @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
+.scenario-result.ran { border-left-color: var(--ink); }
+.scenario-reply { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }

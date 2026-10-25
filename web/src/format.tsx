@@ -164,7 +164,8 @@ export function Rich({ text, trace }: { text: string; trace?: string | null }) {
     parts.push(text.slice(last, at));
     last = at + token.length;
     if (/^-?\$/.test(token)) {
-      const shown = token.startsWith("-") ? `(${token.slice(1)})` : token;
+      // A negative already inside the writer's own parentheses keeps a minus sign instead of doubling them.
+      const shown = !token.startsWith("-") ? token : text[at - 1] === "(" ? `−${token.slice(1)}` : `(${token.slice(1)})`;
       parts.push(
         first ? (
           <a key={at} className="money" href={traceHref(first)} title={`Trace ${first}`}>

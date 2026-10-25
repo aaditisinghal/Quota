@@ -101,18 +101,21 @@ type Facts = {
   ruleText: string | null;
   claimed: number | null;
   disputed: boolean;
+  conceded: boolean;
 };
 
 function caseFacts(trace: Trace, items: TimelineItem[]): Facts | null {
   const nodes = new Map(trace.nodes.map((n) => [n.id, n]));
   const original = trace.root ? nodes.get(trace.root) : undefined;
   if (!original || original.kind !== "line") return null;
-  // Follow "corrected by" to the line that is live now.
+  // Follow "corrected by" to the line that pays now. A negative correction (a clawback, a quarter true-up) is a
+  // recovery of that line, not a new amount for the case, so the walk stops before it.
   let current = original;
   for (let hop = 0; hop < 10; hop++) {
     const next = trace.edges.find((e) => e.from === current.id && e.label === "corrected by");
-    if (!next || !nodes.get(next.to)) break;
-    current = nodes.get(next.to)!;
+    const line = next ? nodes.get(next.to) : undefined;
+    if (!line || (line.amount_cents ?? 0) < 0) break;
+    current = line;
   }
   const disputes = items.filter((i) => i.kind === "DECISION" && i.text.includes(` dispute ${original.id}:`));
   const asserted = disputes.map((i) => i.text.match(/\((\w+) asserted /)?.[1]).find(Boolean);
@@ -148,8 +151,13 @@ function caseFacts(trace: Trace, items: TimelineItem[]): Facts | null {
       : null,
     rule,
     ruleText,
-    claimed: biggest && typeof original.amount_cents === "number" ? original.amount_cents + (biggest.effect_cents ?? 0) : null,
+    // Only a record that would pay more is what a rep claims; one that would pay less was simply outranked.
+    claimed:
+      biggest && (biggest.effect_cents ?? 0) > 0 && typeof original.amount_cents === "number"
+        ? original.amount_cents + (biggest.effect_cents ?? 0)
+        : null,
     disputed: disputes.length > 0,
+    conceded: disputes.some((d) => / dispute CL-[\d-]+: conceded/.test(d.text)),
   };
 }
 
@@ -180,7 +188,7 @@ function Evidence({ facts }: { facts: Facts }) {
       <div className="evidence">
         {facts.outranked && (
           <SourceCard node={facts.outranked.node} field={facts.outranked.field} role="outranked"
-                      note={`Would pay ${usd(facts.outranked.effect)} more if it counted`} />
+                      note={`Would pay ${usd(Math.abs(facts.outranked.effect))} ${facts.outranked.effect >= 0 ? "more" : "less"} if it counted`} />
         )}
         {facts.chosen && <SourceCard node={facts.chosen.node} field={facts.chosen.field} role="used" note="Used for the commission" />}
       </div>
@@ -268,6 +276,8 @@ function Decision({ facts, steps }: { facts: Facts; steps: Step[] }) {
             <>
               paid as claimed, by exception · was <Money cents={facts.original.amount_cents} trace={facts.original.id} /> under the plan
             </>
+          ) : facts.conceded ? (
+            <>as claimed · the dispute was conceded on the evidence</>
           ) : facts.claimed !== null ? (
             <>
               vs <span className="claimed">{usd(facts.claimed)}</span> {facts.disputed ? "claimed" : "if the outranked record counted"}
@@ -277,7 +287,7 @@ function Decision({ facts, steps }: { facts: Facts; steps: Step[] }) {
         </div>
         <div className="figure-status">
           <span className="muted">
-            {String(facts.current.quarter)} · line {facts.current.id} · {String(facts.current.status)}
+            {String(facts.current.quarter)} · line {facts.current.id} · {String(facts.current.status).replace(/_/g, " ")}
           </span>
           {waiting && <span className="badge accent">waiting on a person</span>}
         </div>
@@ -311,7 +321,7 @@ function Decision({ facts, steps }: { facts: Facts; steps: Step[] }) {
   );
 }
 
-const KEEP_DECISIONS = /^D-\d+ (commission_calc|dispute|escalation|resubmission_check|integrity_check)\b/;
+const KEEP_DECISIONS = /^D-\d+ (commission_calc|dispute|escalation|resubmission_check|integrity_check|authority_check)\b/;
 
 /** The timeline items about this line, in order, as plain-English steps. */
 function chain(trace: Trace, items: TimelineItem[], people: Principal[], pending: Pending[]): Step[] {
@@ -325,7 +335,12 @@ function chain(trace: Trace, items: TimelineItem[], people: Principal[], pending
 
   for (const item of items) {
     if (!["DECISION", "APPROVAL", "REFUSED", "ENTRY"].includes(item.kind)) continue;
-    const hit = item.refs.some((r) => ids.has(r)) || (item.kind === "APPROVAL" && / plan_exception /.test(item.text) && dealWord.test(item.text));
+    // A grant about this deal joins the case by name: approvals of it, and the authority check on who wrote it.
+    const aboutDeal = dealWord.test(item.text) || item.text.includes(accountName(deal));
+    const hit =
+      item.refs.some((r) => ids.has(r)) ||
+      (item.kind === "APPROVAL" && / plan_exception /.test(item.text) && aboutDeal) ||
+      (item.kind === "DECISION" && / authority_check /.test(item.text) && aboutDeal);
     if (!hit) continue;
     if (item.kind === "DECISION" && !KEEP_DECISIONS.test(item.text)) continue;
     item.refs.filter((r) => /^(A|CL|D|P)-/.test(r)).forEach((r) => ids.add(r));
@@ -356,6 +371,16 @@ function chain(trace: Trace, items: TimelineItem[], people: Principal[], pending
           detail: asserted ? `asked for ${DISPUTED[asserted[1]] ?? asserted[1]} ${pt(asserted[2].trim())}` : undefined,
           tone: dispute[2] === "held" ? undefined : "done",
           held: dispute[2] === "held" ? 1 : undefined,
+        };
+      } else if (/ authority_check /.test(t)) {
+        const grant = t.match(/authority_check \S+: \w+ from ([\w.]+) routed to ([\w.]+): (.*)$/);
+        const conflict = grant?.[3].match(/conflict of interest: (.*)$/)?.[1];
+        step = {
+          at: item.clock,
+          ids: [head],
+          label: grant ? <>{name(grant[1])} tried to grant it · routed to {name(grant[2])}</> : <>Authority check</>,
+          detail: conflict ? `conflict of interest: ${conflict}` : grant?.[3].split(";")[0],
+          tone: "refused",
         };
       } else if (/ escalation /.test(t)) {
         const to = t.match(/-> ([\w.]+) \(([^)]+)\)/);

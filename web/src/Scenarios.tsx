@@ -109,16 +109,33 @@ export function ScenarioMenu({ open, onClose, onRan }: Props) {
   );
 }
 
-/** The last scenario's result, above the screen it switched to. */
+/** The last scenario's result, above the screen it switched to: what it should show, Quota's reply if it gave
+ * one, and the run's own facts under Details. The tests assert the outcome; a mark shows only if the run says. */
 export function ScenarioResult({ run, onClose }: { run: ScenarioRun; onClose: () => void }) {
+  const { ok, summary, reply } = run.result;
+  const tone = ok === true ? "ok" : ok === false ? "bad" : "ran";
   return (
-    <div className={`scenario-result ${run.result.ok ? "ok" : "bad"}`} role="status">
-      <span className="scenario-mark">{run.result.ok ? "✓" : "✗"}</span>
+    <div className={`scenario-result ${tone}`} role="status">
+      <span className="scenario-mark">{ok === true ? "✓" : ok === false ? "✗" : "▸"}</span>
       <div>
-        <strong>Scenario {run.name}</strong>
-        <div>
-          <Reply text={run.result.summary} />
+        <strong>“{run.phrase}”</strong> <span className="muted">from {run.checkpoint}</span>
+        {summary && (
+          <div>
+            <Reply text={summary} />
+          </div>
+        )}
+        <div className="muted">
+          Expected: <Reply text={run.expect && typeof run.expect === "string" ? run.expect : JSON.stringify(run.expect)} />
         </div>
+        {reply && (
+          <div className="scenario-reply">
+            <Reply text={reply} />
+          </div>
+        )}
+        <details className="details">
+          <summary>Details</summary>
+          <pre className="raw">{JSON.stringify(run.result, null, 2)}</pre>
+        </details>
       </div>
       <button className="link" onClick={onClose} aria-label="Dismiss">
         ✕

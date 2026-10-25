@@ -184,16 +184,17 @@ export type Scorecard = {
 // Scenarios and presenter mode (NEXT_TASKS R4, R7.3). Servers without them answer 404 or 405.
 export type Scenario = { name: string; phrase: string; checkpoint: string; expect: unknown };
 
-export type ScenarioRun = {
-  name: string;
+// A run's `result` is that scenario's own facts (lines, refusals, entries, a reply); `expect` says what it should show.
+export type ScenarioRun = Scenario & {
   clock: string;
   timeline: TimelineItem[];
-  result: { ok: boolean; summary: string; [field: string]: unknown };
+  result: { ok?: boolean; summary?: string; reply?: string; tab?: string; [field: string]: unknown };
 };
 
-export type DemoStep = { n: number; narration: string; tab?: string };
+// Step 0 is the start; each later step restores a named checkpoint of the scripted demo.
+export type DemoStep = { n: number; narration: string; checkpoint?: string; tab?: string };
 
-export type DemoStepRun = { n: number; narration: string; clock: string; timeline: TimelineItem[]; tab?: string };
+export type DemoStepRun = DemoStep & { clock: string; timeline: TimelineItem[] };
 
 /** An API error with its HTTP status, so a screen can tell "not on this server" from a failure. */
 export class ApiError extends Error {
