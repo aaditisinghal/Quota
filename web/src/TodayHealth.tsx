@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FlashMoney, FlashText } from "./Flash";
 import { api, type Health, type Principal, type Today } from "./api";
 import { Money, Rich, TraceLink, When, personName, pt, usd } from "./format";
 
@@ -114,7 +115,9 @@ function HealthPanel({ health }: { health: Health }) {
               <li key={item.label}>
                 <span className="cascade-label">{item.label}</span>
                 <span>
-                  <Rich text={item.text} trace={item.trace} />
+                  <FlashText id={`cascade:${c.deal}:${item.label}`} text={item.text}>
+                    <Rich text={item.text} trace={item.trace} />
+                  </FlashText>
                 </span>
               </li>
             ))}
@@ -161,9 +164,11 @@ function HealthPanel({ health }: { health: Health }) {
                     <div className="muted">{t.subledger}</div>
                   </td>
                   <td className="num">
-                    <Money cents={t.gl_cents} trace={`account/${t.name.match(/\((\d{4})\)/)?.[1] ?? ""}`} />
+                    <FlashMoney id={`tie:${t.name}:gl`} cents={t.gl_cents} trace={`account/${t.name.match(/\((\d{4})\)/)?.[1] ?? ""}`} />
                   </td>
-                  <td className="num">{usd(t.subledger_cents)}</td>
+                  <td className="num">
+                    <FlashMoney id={`tie:${t.name}:sub`} cents={t.subledger_cents} />
+                  </td>
                   <td className={t.ok ? "ok" : "bad"}>{t.ok ? "✓ ties" : "✗"}</td>
                 </tr>
               ))}
@@ -201,8 +206,12 @@ function HealthPanel({ health }: { health: Health }) {
                     <td>
                       <span className="mono">{a.account}</span> {a.name}
                     </td>
-                    <td className="num">{a.balance_cents > 0 && <Money cents={a.balance_cents} trace={`account/${a.account}`} />}</td>
-                    <td className="num">{a.balance_cents < 0 && <Money cents={-a.balance_cents} trace={`account/${a.account}`} />}</td>
+                    <td className="num">
+                      <FlashMoney id={`tb:${a.account}:dr`} cents={Math.max(a.balance_cents, 0)} trace={`account/${a.account}`} blankZero />
+                    </td>
+                    <td className="num">
+                      <FlashMoney id={`tb:${a.account}:cr`} cents={Math.max(-a.balance_cents, 0)} trace={`account/${a.account}`} blankZero />
+                    </td>
                     <td className="num delta">{delta ? `${delta > 0 ? "Dr" : "Cr"} ${usd(Math.abs(delta))}` : ""}</td>
                   </tr>
                 );
@@ -211,8 +220,12 @@ function HealthPanel({ health }: { health: Health }) {
             <tfoot>
               <tr>
                 <td>Total</td>
-                <td className="num">{usd(tb.debits_cents)}</td>
-                <td className="num">{usd(tb.credits_cents)}</td>
+                <td className="num">
+                  <FlashMoney id="tb:debits" cents={tb.debits_cents} />
+                </td>
+                <td className="num">
+                  <FlashMoney id="tb:credits" cents={tb.credits_cents} />
+                </td>
                 <td className={tb.debits_cents === tb.credits_cents ? "ok" : "bad"}>
                   {tb.debits_cents === tb.credits_cents ? "✓ balanced" : "✗"}
                 </td>

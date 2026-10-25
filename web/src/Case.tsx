@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Pending, type Principal, type TimelineItem, type Trace, type TraceNode } from "./api";
 import { ChatPane } from "./ChatPane";
+import { FlashMoney } from "./Flash";
 import { Money, TraceLink, When, accountName, learnAccounts, personName, pt, usd } from "./format";
 
 // The first twenty seconds of the demo: one disputed line, the two records that disagree, the rule that decides,
@@ -260,7 +261,7 @@ function Decision({ facts, steps }: { facts: Facts; steps: Step[] }) {
       <h3>Decision and approval chain</h3>
       <div className="figure">
         <div className="figure-main">
-          <Money cents={facts.current.amount_cents} trace={facts.current.id} />
+          <FlashMoney id={`case:${facts.original.id}`} cents={facts.current.amount_cents ?? 0} trace={facts.current.id} />
         </div>
         <div className="figure-sub">
           {changed ? (

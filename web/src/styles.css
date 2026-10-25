@@ -313,3 +313,8 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .scenario-result.ok .scenario-mark { color: var(--ok); }
 .scenario-result.bad .scenario-mark { color: var(--bad); }
 .scenario-result > div { flex: 1; min-width: 0; }
+
+/* R7.5: a figure that changed flashes once */
+@keyframes flash { from { background: var(--mark); box-shadow: 0 0 0 3px var(--mark); } to { background: transparent; box-shadow: 0 0 0 3px transparent; } }
+.flash { animation: flash 600ms ease-out; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
