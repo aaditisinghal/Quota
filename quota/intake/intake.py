@@ -12,6 +12,7 @@ blank opportunity owner is held, a Stripe row without metadata is matched to its
 row without an opportunity id goes to review. Everything that loads goes through `WritePath.append_fact`.
 """
 
+import uuid
 import csv
 import json
 from pathlib import Path
@@ -254,7 +255,7 @@ class Intake:
         for path in sorted(self.inbox.glob("*.csv")):
             self.map_file(path)
         self.read_plans()
-        uri = db_path or db.memory_uri(f"quota-intake-{id(self)}")
+        uri = db_path or db.memory_uri(f"quota-intake-{uuid.uuid4().hex}")  # id(self) can be reused after GC
         conn = db.connect(uri)
         db.init_db(conn)
         wp = WritePath(conn, clk.SimClock(INTAKE_AT), {**config.principals(), **PRINCIPAL})

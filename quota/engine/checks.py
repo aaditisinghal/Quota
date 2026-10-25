@@ -131,7 +131,8 @@ def check_precedent_pattern(rows, field, threshold) -> dict:
     return {"fn": "check_precedent_pattern", "args": {"field": field, "threshold": threshold}, "result": result}
 
 
-KNOWN_CLAUSES = {"billing", "termination_for_convenience", "amendment"}
+# price_increase_cap is a renewal term: it changes revenue, not commission, so no plan rule is needed for it.
+KNOWN_CLAUSES = {"billing", "termination_for_convenience", "amendment", "price_increase_cap"}
 
 
 def check_no_rule(rows, deal_id) -> dict:

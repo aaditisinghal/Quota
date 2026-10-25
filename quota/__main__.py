@@ -137,6 +137,14 @@ def cmd_backtest(args) -> int:
     return 0
 
 
+def cmd_gen_messages(args) -> int:
+    from quota.sim import messages
+    corpus, key = messages.corpus_for(args.world, args.seed)
+    messages.write(corpus, key, args.out)
+    print(f"Wrote {len(corpus)} messages to {args.out} and {len(key)} answer-key rows to messages_key.json")
+    return 0
+
+
 def cmd_elastic(args) -> int:
     from quota.search import elastic_client
     if not elastic_client.configured():
@@ -235,6 +243,12 @@ def main(argv=None) -> int:
     back.add_argument("--out", default="out")
     back.add_argument("--live", action="store_true")
     back.set_defaults(fn=cmd_backtest)
+
+    gen = sub.add_parser("gen-messages", help="the sales email and Slack corpus with planted promises (E1)")
+    gen.add_argument("--world", choices=["fernhill", "acme"], default="fernhill")
+    gen.add_argument("--seed", type=int, default=7)
+    gen.add_argument("--out", default="inbox/messages.jsonl")
+    gen.set_defaults(fn=cmd_gen_messages)
 
     elastic = sub.add_parser("elastic", help="the Elastic evidence layer (ELASTIC_TASKS)")
     elastic.add_argument("action", choices=["ping", "setup", "ingest", "verify", "eval-search", "agent-setup",

@@ -115,6 +115,7 @@ class Fernhill:
         self.plan_drafts: dict[str, dict] = {}         # rep -> unsigned plan version (E14)
         self.used_deals: set[str] = set()
         self.exclusive_reps: set[str] = set()         # reps whose whole book is one case
+        self.covered: dict[str, dict] = {}             # deal -> extra signed clauses (ELASTIC_TASKS E1 decoys)
 
     # ---------- people and deals ----------
 
@@ -418,7 +419,19 @@ class Fernhill:
             for _ in range(count):
                 getattr(self, f"plant_{error}")()
         self.fill_expected()
+        self.plant_covered_terms()
         return self.answer_key
+
+    def plant_covered_terms(self) -> None:
+        """Two deals no case uses get terms a sales message may truthfully mention (decoys D01 and D04 of the
+        evidence layer): a 90-day termination for convenience, and a 5% renewal price cap in section 7. Chosen
+        with their own random stream, so the cases above do not move."""
+        rng = random.Random(f"covered-{self.seed}")
+        free = sorted(d.id for d in self.deals if d.id not in self.used_deals and len(d.splits) == 1
+                      and not self.deal_reps(d) & self.exclusive_reps)
+        exit_deal, cap_deal = rng.sample(free, 2)
+        self.covered[exit_deal] = {"termination_for_convenience": {"window_days": 90, "refund": "pro_rata"}}
+        self.covered[cap_deal] = {"price_increase_cap": {"bps": 500, "section": 7}}
 
     def truth_rows(self, rep_id: str) -> dict:
         """The facts as they truly end up (from the generator, not from Quota's ledger), shaped like DB rows."""
@@ -477,7 +490,7 @@ class Fernhill:
                  "actor": deal.owner}),
                (deal.booked_at, "contract.countersigned",
                 {"deal_id": deal.id, "timestamp": deal.booked_at, "acv_cents": deal.acv_cents,
-                 "term_months": deal.term, "clauses": {"billing": "annual_upfront"}}),
+                 "term_months": deal.term, "clauses": {"billing": "annual_upfront", **self.covered.get(deal.id, {})}}),
                (deal.invoice_at, "invoice.issued", {"stripe_id": f"in_{deal.id}", "deal_id": deal.id,
                                                     "amount_cents": deal.acv_cents, "date": deal.invoice_at[:10]})]
         if deal.paid_at:
