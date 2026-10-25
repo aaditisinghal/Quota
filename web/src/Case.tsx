@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, type Pending, type Principal, type TimelineItem, type Trace, type TraceNode } from "./api";
+import {
+  api,
+  type ContractCard,
+  type Pending,
+  type Principal,
+  type Recipient,
+  type TimelineItem,
+  type Trace,
+  type TraceNode,
+} from "./api";
 import { ChatPane } from "./ChatPane";
 import { FlashMoney } from "./Flash";
 import { Money, TraceLink, When, accountName, learnAccounts, personName, pt, usd } from "./format";
@@ -30,11 +39,16 @@ type Props = {
   away: Record<string, string>;
   version: number;
   onChange: () => void;
+  onOpen: (line: string) => void; // the case picker chose another line
+  onRep?: (rep: string) => void; // the open line's rep, once its trace has loaded
+  idle?: string | null; // a person the speaker picker followed who has nothing waiting
 };
 
-export function CaseView({ line, items, people, pending, principal, setPrincipal, away, version, onChange }: Props) {
-  const [trace, setTrace] = useState<Trace | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const SELECT_STYLE = { border: "1px solid var(--line)", borderRadius: 6, padding: "4px 8px", background: "var(--panel)", font: "inherit", color: "inherit", maxWidth: "100%" };
+
+export function CaseView({ line, items, people, pending, principal, setPrincipal, away, version, onChange, onOpen, onRep, idle }: Props) {
+  // The trace is kept with the line it answers, so a newly chosen case never shows under the previous one's title.
+  const [loaded, setLoaded] = useState<{ line: string; trace: Trace | null; error: string | null } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -43,42 +57,89 @@ export function CaseView({ line, items, people, pending, principal, setPrincipal
       .then((t) => {
         if (!live) return;
         learnAccounts(t.nodes);
-        setTrace(t);
-        setError(null);
+        setLoaded({ line, trace: t, error: null });
       })
-      .catch((e: Error) => live && (setTrace(null), setError(e.message)));
+      .catch((e: Error) => live && setLoaded({ line, trace: null, error: e.message }));
     return () => {
       live = false;
     };
   }, [line, version]);
 
+  const current = loaded?.line === line ? loaded : null;
+  const trace = current?.trace ?? null;
+  const error = current?.error ?? null;
   const facts = useMemo(() => (trace ? caseFacts(trace, items) : null), [trace, items]);
   const steps = useMemo(() => (trace ? chain(trace, items, people, pending) : []), [trace, items, people, pending]);
+  const lineRep = trace ? String(trace.nodes.find((n) => n.id === trace.root)?.rep ?? "") : "";
+  useEffect(() => {
+    if (lineRep && onRep) onRep(lineRep);
+  }, [lineRep, onRep]);
 
-  if (error || (trace && !facts)) {
-    return (
-      <section className="case">
-        <div className="card unknown">
-          <h3>No case on {line}</h3>
-          <p className="muted">{error ?? "This line has no source disagreement to show."}</p>
-        </div>
-      </section>
-    );
-  }
-  if (!trace || !facts) return <section className="case muted">Loading {line}…</section>;
+  // The case picker: the selected rep's contract lines, or every rep's lines for anyone else.
+  const rep = isRep(principal, people);
+  const known = people.length > 0;
+  const [options, setOptions] = useState<CaseOption[]>([]);
+  useEffect(() => {
+    if (!known) return;
+    let live = true;
+    caseOptions(principal, people)
+      .then((o) => live && setOptions(o))
+      .catch(() => live && setOptions([]));
+    return () => {
+      live = false;
+    };
+    // The list follows the speaker, not every state poll (people is a new array on each one).
+  }, [principal, rep, known]);
+
+  const title = facts ? `${accountName(facts.deal)} · ${personName(facts.rep, people)}'s commission` : null;
+  const unknown = !!error || (!!trace && !facts);
 
   return (
     <section className="case">
       <div className="case-head">
         <span className="kind-tag">case</span>
-        <h2>
-          {accountName(facts.deal)} · {personName(facts.rep, people)}'s commission
-        </h2>
+        {title ? <h2>{title}</h2> : <h2 className="muted">{unknown ? `No case on ${line}` : `Loading ${line}…`}</h2>}
         <TraceLink id={line} />
       </div>
+      <div className="case-head">
+        <label className="muted" htmlFor="case-pick">
+          Open a case
+        </label>
+        <select id="case-pick" style={SELECT_STYLE} value={line} onChange={(e) => e.target.value !== line && onOpen(e.target.value)}>
+          {!options.some((o) => o.line === line) && <option value={line}>{title ? `${title} · ${line}` : line}</option>}
+          {options.map((o) => (
+            <option key={o.line} value={o.line}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {idle && idle === principal && (
+          <span className="muted">
+            Nothing is waiting on {personName(idle, people)}; showing {title ?? line}
+          </span>
+        )}
+      </div>
       <div className="case-grid">
-        <Evidence facts={facts} />
-        <Decision facts={facts} steps={steps} />
+        {facts ? (
+          <>
+            <Evidence facts={facts} />
+            <Decision facts={facts} steps={steps} />
+          </>
+        ) : (
+          <>
+            <div className="case-col">
+              {unknown ? (
+                <div className="card unknown">
+                  <h3>No case on {line}</h3>
+                  <p className="muted">{error ?? "This line has no source disagreement to show."}</p>
+                </div>
+              ) : (
+                <p className="muted">Loading {line}…</p>
+              )}
+            </div>
+            <div className="case-col" />
+          </>
+        )}
         <div className="case-col case-chat">
           <h3>Conversation</h3>
           <ChatPane principal={principal} setPrincipal={setPrincipal} people={people} pending={pending} away={away}
@@ -87,6 +148,80 @@ export function CaseView({ line, items, people, pending, principal, setPrincipal
       </div>
     </section>
   );
+}
+
+function isRep(id: string, people: Principal[]): boolean {
+  return people.find((p) => p.id === id)?.capabilities.includes("dispute:own_lines") ?? false;
+}
+
+type CaseLine = { line: string; rep: string; customer: string; status: string; at: string; confidence: number | null; amendment: boolean };
+
+/** Every commission line on these contracts and their amendments, with the server's confidence for its recipient. */
+function contractLines(contracts: ContractCard[]): CaseLine[] {
+  const out: CaseLine[] = [];
+  const seen = new Set<string>();
+  const add = (l: CaseLine) => {
+    if (seen.has(l.line)) return;
+    seen.add(l.line);
+    out.push(l);
+  };
+  for (const c of contracts) {
+    const score = (line: string, recipients: Recipient[] | undefined) =>
+      recipients?.find((r) => r.line === line)?.confidence?.score ?? null;
+    for (const l of c.lines) {
+      add({ line: l.id, rep: l.rep, customer: c.customer, status: l.status, at: c.countersigned_at ?? "",
+            confidence: score(l.id, c.recipients), amendment: false });
+    }
+    for (const child of c.children ?? []) {
+      for (const inc of child.incremental_lines ?? []) {
+        const id = typeof inc === "string" ? inc : inc.id;
+        const who = child.recipients?.find((r) => r.line === id)?.who ?? "";
+        add({ line: id, rep: who, customer: c.customer, status: "", at: child.signed_at ?? "",
+              confidence: score(id, child.recipients), amendment: true });
+      }
+    }
+  }
+  return out;
+}
+
+type CaseOption = { line: string; label: string };
+
+/** The case picker's choices: "Customer · rep · line id". */
+async function caseOptions(person: string, people: Principal[]): Promise<CaseOption[]> {
+  const details = isRep(person, people)
+    ? [await api.rep(person)]
+    : await Promise.all((await api.reps()).map((r) => api.rep(r.rep).catch(() => null)));
+  const lines = contractLines(details.flatMap((d) => d?.contracts ?? []));
+  return lines.map((l) => ({
+    line: l.line,
+    label: `${l.customer}${l.amendment ? " amendment" : ""} · ${l.rep ? personName(l.rep, people) : "?"} · ${l.line}${
+      l.status === "superseded" ? " (superseded)" : ""
+    }`,
+  }));
+}
+
+/**
+ * The line a person's case opens on, or null when nothing is waiting on them. A rep's is their least certain line
+ * (the lowest confidence score, the most recent on a tie; else their first line). Anyone else's is the line behind
+ * the first item in their Needs-you group. Only which line to show is chosen here; every figure stays the server's.
+ */
+export async function caseLineFor(person: string, people: Principal[]): Promise<string | null> {
+  if (isRep(person, people)) {
+    const own = contractLines((await api.rep(person)).contracts).filter((l) => l.rep === person);
+    const live = own.filter((l) => l.status !== "superseded");
+    const scored = live.filter((l) => l.confidence !== null);
+    scored.sort((a, b) => (a.confidence ?? 0) - (b.confidence ?? 0) || b.at.localeCompare(a.at) || b.line.localeCompare(a.line));
+    return scored[0]?.line ?? live[0]?.line ?? own[0]?.line ?? null;
+  }
+  const group = (await api.needsYou()).people.find((g) => g.person === person);
+  for (const item of group?.items ?? []) {
+    const deal = item.deals?.[0];
+    if (!deal) continue;
+    const card = await api.contract(deal);
+    const line = card.lines.find((l) => l.status !== "superseded") ?? card.lines[0];
+    if (line) return line.id;
+  }
+  return null;
 }
 
 type Facts = {

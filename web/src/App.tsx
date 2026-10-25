@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isMissing, type ScenarioRun, type TimelineItem, type WorldState } from "./api";
-import { CaseView } from "./Case";
+import { CaseView, caseLineFor } from "./Case";
 import { ChatPane } from "./ChatPane";
 import { HomeView } from "./Home";
 import { InjectScore } from "./InjectScore";
@@ -192,6 +192,71 @@ export function App() {
   const people = state?.principals ?? [];
   const waiting = pending.reduce((s, a) => s + a.amount_cents, 0);
 
+  // The Case tab follows the speaker: picking a person opens their case (a rep's least certain line, an
+  // approver's first Needs-you item), and opening a case speaks as its rep until the user picks someone.
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const peopleRef = useRef(people);
+  peopleRef.current = people;
+  const principalRef = useRef(principal);
+  principalRef.current = principal;
+  const picked = useRef(false); // the user chose a speaker since the page loaded
+  const stale = useRef(false); // they chose one on another tab; the Case tab catches up when opened plainly
+  const following = useRef(0);
+  const [caseIdle, setCaseIdle] = useState<string | null>(null);
+
+  const openCase = useCallback((line: string) => {
+    following.current += 1; // an explicit choice outranks a follow still in flight
+    setCaseIdle(null);
+    setCaseLine(line);
+    window.location.hash = `case/${line}`;
+  }, []);
+
+  const followCase = useCallback((who: string) => {
+    const mine = ++following.current;
+    caseLineFor(who, peopleRef.current)
+      .then((line) => {
+        if (mine !== following.current) return;
+        if (!line) {
+          setCaseIdle(who);
+          return;
+        }
+        setCaseIdle(null);
+        setCaseLine(line);
+        if (tabRef.current === "case") window.location.hash = `case/${line}`;
+      })
+      .catch(() => mine === following.current && setCaseIdle(null));
+  }, []);
+
+  const speak = useCallback(
+    (who: string) => {
+      picked.current = true;
+      setPrincipal(who);
+      setCaseIdle(null);
+      if (tabRef.current === "case") followCase(who);
+      else stale.current = true;
+    },
+    [followCase],
+  );
+
+  useEffect(() => {
+    if (tab !== "case") return;
+    const behind = stale.current;
+    stale.current = false;
+    if (behind && !id) followCase(principalRef.current); // an explicit #case/CL-x wins
+  }, [tab, id, followCase]);
+
+  const known = people.length > 0;
+  const caseRep = useCallback(
+    (rep: string) => {
+      if (picked.current || rep === principalRef.current) return;
+      if (peopleRef.current.some((p) => p.id === rep)) setPrincipal(rep);
+    },
+    // re-offered once the people load, so a shared #case/CL-x link that loads first still sets the speaker
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [known],
+  );
+
   return (
     <div className={`app ${presenting ? "presenting" : ""}`}>
       <header className="top">
@@ -246,14 +311,15 @@ export function App() {
           )}
           {tab === "case" && (
             <CaseView line={caseLine} items={items} people={people} pending={pending} principal={principal}
-                      setPrincipal={setPrincipal} away={state?.away ?? {}} version={version} onChange={update} />
+                      setPrincipal={speak} away={state?.away ?? {}} version={version} onChange={update}
+                      onOpen={openCase} onRep={caseRep} idle={caseIdle} />
           )}
           {tab === "trace" && (
             <TraceView id={traceId} stops={stops} people={people}
                        onOpen={(next) => (window.location.hash = `trace/${encodeURIComponent(next)}`)} />
           )}
           {tab === "chat" && (
-            <ChatPane principal={principal} setPrincipal={setPrincipal} people={people} pending={pending}
+            <ChatPane principal={principal} setPrincipal={speak} people={people} pending={pending}
                       away={state?.away ?? {}}
                       version={version} onChange={update} />
           )}
