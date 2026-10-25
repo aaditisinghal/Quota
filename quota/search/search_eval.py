@@ -55,7 +55,7 @@ def table(result) -> list[str]:
              f"{result['decoys']} decoys",
              f"{'mode':<22}{'recall@20':<11}{'decoys_in_top20':<17}{'multilingual':<14}thread"]
     for row in result["modes"].values():
-        lines.append(f"{row['label']:<22}{row['recall']}/{row['planted']:<9}{row['decoys_in_top20']:<17}"
+        lines.append(f"{row['label']:<22}{str(row['recall']) + '/' + str(row['planted']):<11}{row['decoys_in_top20']:<17}"
                      f"{tick(row['multilingual']):<14}{tick(row['thread'])}")
     r = result.get("precedent_recall")
     if r:

@@ -44,13 +44,13 @@ def ingest(args):
 
 @action("verify")
 def verify(args):
-    """Mirror the served Acme story's ledger as it stands at the end of the demo, then compare."""
-    from quota.search import mirror
-    from quota.sim import demo_acme
-    demo = demo_acme.run(out=lambda line: None)
+    """Mirror the auditor rehearsal world's ledger (the served Acme story with the dispute, the over-limit
+    exception and Riley's side letter), then compare the mirror with it."""
+    from quota.search import auditor_world, mirror
+    demo = auditor_world.build()
     try:
         client = _client()
-        mirror.mirror_decisions(demo.ro, client)
+        mirror.mirror_decisions(demo.ro, client, full=True)
         result = mirror.verify(demo.ro, client)
     finally:
         demo.close()
