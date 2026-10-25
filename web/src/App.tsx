@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type TimelineItem, type WorldState } from "./api";
+import { CaseView } from "./Case";
 import { ChatPane } from "./ChatPane";
 import { InjectScore } from "./InjectScore";
 import { Timeline } from "./Timeline";
 import { TodayHealth } from "./TodayHealth";
 import { TraceView } from "./TraceView";
-import { usd, when } from "./format";
+import { setWorldYear, usd, when } from "./format";
 
-type Tab = "trace" | "chat" | "today" | "inject";
+type Tab = "case" | "trace" | "chat" | "today" | "inject";
 const TABS: [Tab, string][] = [
+  ["case", "Case"],
   ["chat", "Chat"],
   ["trace", "Trace"],
   ["today", "Today + Ledger health"],
@@ -18,13 +20,15 @@ const TABS: [Tab, string][] = [
 function route(): { tab: Tab; id: string | null } {
   const hash = decodeURIComponent(window.location.hash.slice(1));
   if (hash.startsWith("trace/")) return { tab: "trace", id: hash.slice(6) };
-  if (hash === "trace" || hash === "chat" || hash === "today" || hash === "inject") return { tab: hash, id: null };
-  return { tab: "chat", id: null };
+  if (hash.startsWith("case/")) return { tab: "case", id: hash.slice(5) };
+  if (TABS.some(([key]) => key === hash)) return { tab: hash as Tab, id: null };
+  return { tab: "case", id: null };
 }
 
 export function App() {
   const [{ tab, id }, setRoute] = useState(route);
   const [traceId, setTraceId] = useState("CL-0001");
+  const [caseLine, setCaseLine] = useState("CL-0001");
   const [state, setState] = useState<WorldState | null>(null);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [version, setVersion] = useState(0);
@@ -38,8 +42,9 @@ export function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useEffect(() => {
-    if (id) setTraceId(id);
-  }, [id]);
+    if (id && tab === "trace") setTraceId(id);
+    if (id && tab === "case") setCaseLine(id);
+  }, [id, tab]);
 
   const refresh = useCallback(async () => {
     try {
@@ -52,6 +57,7 @@ export function App() {
           return [...old, ...timeline.items.filter((i) => i.seq > last)];
         });
       }
+      setWorldYear(world.clock);
       setState(world);
       setOffline(false);
       setVersion((v) => v + 1);
@@ -103,8 +109,12 @@ export function App() {
           </a>
         ))}
       </nav>
-      <div className="body">
+      <div className={`body ${tab === "case" ? "wide" : ""}`}>
         <main>
+          {tab === "case" && (
+            <CaseView line={caseLine} items={items} people={people} pending={pending} principal={principal}
+                      setPrincipal={setPrincipal} away={state?.away ?? {}} version={version} onChange={refresh} />
+          )}
           {tab === "trace" && (
             <TraceView id={traceId} stops={stops} people={people}
                        onOpen={(next) => (window.location.hash = `trace/${encodeURIComponent(next)}`)} />
@@ -119,7 +129,7 @@ export function App() {
             <InjectScore clock={state.clock} people={people} world={state.world} seed={state.seed} onChange={refresh} />
           )}
         </main>
-        <Timeline items={items} people={people} pending={pendingIds} />
+        {tab !== "case" && <Timeline items={items} people={people} pending={pendingIds} />}
       </div>
     </div>
   );

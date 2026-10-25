@@ -29,9 +29,10 @@ type Props = {
   away: Record<string, string>;
   version: number;
   onChange: () => void;
+  compact?: boolean; // embedded in the Case view: names only, no statement or turn summary
 };
 
-export function ChatPane({ principal, setPrincipal, people, pending, away, version, onChange }: Props) {
+export function ChatPane({ principal, setPrincipal, people, pending, away, version, onChange, compact }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,7 +72,7 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
   const isRep = me?.capabilities.includes("dispute:own_lines") ?? false;
 
   return (
-    <section className="chat">
+    <section className={`chat ${compact ? "compact" : ""}`}>
       <div className="people" role="radiogroup" aria-label="Speak as">
         <span className="label">Speak as</span>
         {people.map((p) => (
@@ -83,13 +84,13 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
             onClick={() => setPrincipal(p.id)}
           >
             <strong>{p.name}</strong>
-            <span>{p.title}</span>
+            {!compact && <span>{p.title}</span>}
             {pending.some((a) => a.approver === p.id) && <span className="dot accent" aria-label="has approvals waiting" />}
             {away[p.id] && <span className="away">away until {when(away[p.id]).slice(0, 10)}</span>}
           </button>
         ))}
       </div>
-      {me && (
+      {me && !compact && (
         <p className="who">
           {me.name}, {me.title}. Can: {me.capabilities.filter((c) => !c.startsWith("read")).join(", ") || "nothing beyond chat"}
           {me.limit_cents !== null && <> · approval limit <Money cents={me.limit_cents} /></>}
@@ -137,9 +138,9 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
         <div ref={bottom} />
       </div>
 
-      {isRep && <StatementPanel rep={principal} version={version} />}
+      {isRep && !compact && <StatementPanel rep={principal} version={version} />}
 
-      {events.length > 0 && (
+      {events.length > 0 && !compact && (
         <div className="turn-events">
           <h3>What Quota did</h3>
           <ol className="tl-list">
