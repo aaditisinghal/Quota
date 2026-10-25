@@ -6,6 +6,7 @@ Routes: job.due commission_accrual / amortization / churn_review, and approval.d
 import json
 
 from quota import clock as clk
+from quota import config
 from quota.agent.seat import Seat
 from quota.engine import amortization, entries, routing
 from quota.ledger import queries
@@ -146,22 +147,47 @@ class DeferredAccountant(Seat):
         out = []
         for line, schedule in ctx.data["todo"]:
             rows = {"deals": [ctx.data["deal"]], "commission_lines": [line],
-                    "amortization_schedules": [schedule] if schedule else []}
+                    "amortization_schedules": [schedule] if schedule else [],
+                    "plans": queries.fetch_all(self.ro, "SELECT * FROM plans WHERE rep_id = ? AND known_at <= ? "
+                                                        "ORDER BY id, version", (line["rep_id"], self.now)),
+                    "people": [self.get("people", line["rep_id"])]}
             out.append((line, schedule, rows, entries.void_decision(rows, line["id"], self.now)))
         return out
+
+    def escalate_chargeback(self, code, line, decision_id) -> None:
+        """R2: no receivable could be booked; the Controller decides what, if anything, happens next."""
+        controller = routing.owner("material_flag")
+        why = ("the signed plan does not make commissions recoverable advances, or this one is already earned"
+               if code == "CHARGEBACK_NOT_PERMITTED" else "the rep has left, so there is no future advance to net it "
+                                                         "against")
+        self.wp.add_message("slack:dm", self.principal, controller,
+                            f"{code} on {line['id']} ({config.display_name(line['rep_id'])}, "
+                            f"{fmt_usd(line['amount_cents'])}, {decision_id}): {why}. No receivable was booked; the "
+                            f"remainder is expensed. Recovering anything now is your call.", None)
+        self.emit("MESSAGE", f"to {controller}: {code} on {line['id']} ({decision_id})")
 
     def write_void(self, ctx):
         decision_ids = []
         for line, schedule, rows, void in ctx.calc:
-            text = (f"{line['deal_id']} voided {void['output']['args']['date']}: the commission on {line['id']} was "
-                    f"never earned; recover {fmt_usd(line['amount_cents'])} from {line['rep_id']} in the open period "
-                    f"({entry_text(void['entry']['lines'])})")
+            code = void["output"]["args"].get("chargeback_code")
+            entry = void["entry"]
+            if code:
+                text = (f"{line['deal_id']} voided {void['output']['args']['date']}: the commission on {line['id']} was "
+                        f"never earned, but {code}: no receivable from {line['rep_id']}"
+                        + (f"; the unamortized asset is expensed ({entry_text(entry['lines'])})" if entry else ""))
+            else:
+                text = (f"{line['deal_id']} voided {void['output']['args']['date']}: the commission on {line['id']} "
+                        f"was never earned; recover {fmt_usd(line['amount_cents'])} from {line['rep_id']} in the open "
+                        f"period ({entry_text(entry['lines'])})")
             decision_id = self.wp.record_decision(self.principal, "void_reversal", line["id"], queries.input_refs(rows),
-                                                  {}, [], void["output"], "drafted", text)
+                                                  {}, [], void["output"], "escalated" if code else "drafted", text)
             self.emit("DECISION", f"{decision_id} void_reversal {line['id']}: {text}")
-            je_id = self.draft(void["entry"], decision_id)
-            self.emit("ENTRY", f"{je_id} drafted void_reversal {line['id']}: {entry_text(void['entry']['lines'])}")
-            self.request_entry_approval(je_id, line["amount_cents"])
+            if entry:
+                je_id = self.draft(entry, decision_id)
+                self.emit("ENTRY", f"{je_id} drafted void_reversal {line['id']}: {entry_text(entry['lines'])}")
+                self.request_entry_approval(je_id, line["amount_cents"])
+            if code:
+                self.escalate_chargeback(code, line, decision_id)
             if schedule:
                 self.emit("ENTRY", f"{schedule['id']} cancelled ({self.wp.cancel_schedule(self.principal, schedule['id'])})")
             decision_ids.append(decision_id)
@@ -210,7 +236,8 @@ class DeferredAccountant(Seat):
                 if (line["amount_cents"] > 0 and line["id"] not in reviewed and line["id"] in schedules
                         and self.line_status(line["id"]) in ("approved", "paid")):
                     rows = {**queries.commission_rows(self.ro, line["rep_id"], self.now), "commission_lines": [line],
-                            "events": [churn], "amortization_schedules": [schedules[line["id"]]]}
+                            "events": [churn], "amortization_schedules": [schedules[line["id"]]],
+                            "people": [self.get("people", line["rep_id"])]}
                     todo.append((line, schedules[line["id"]], rows))
         return todo
 
@@ -228,6 +255,8 @@ class DeferredAccountant(Seat):
             text = (f"booking {a['booking_date']}{precedent}, churn {a['churn_date']} {within} {a['window_months']} "
                     f"months (window ends {a['window_end']}), {signed_plan} -> "
                     f"{'recoverable' if a['recoverable'] else 'not recoverable'}")
+            if a.get("chargeback_code"):
+                text += f" ({a['chargeback_code']}: no receivable; the unamortized remainder is expensed)"
             # A clawback always needs the Controller's sign-off on its entry: an escalation, not a routine draft.
             decision_id = self.wp.record_decision(self.principal, "clawback", line["id"], queries.input_refs(rows),
                                                   cb["resolutions"], cb["precedent_ids"], cb["output"], "escalated", text)
@@ -235,6 +264,8 @@ class DeferredAccountant(Seat):
             je_id = self.draft(cb["entry"], decision_id)
             self.emit("ENTRY", f"{je_id} drafted clawback {line['id']}: {entry_text(cb['entry']['lines'])}")
             self.request_entry_approval(je_id, line["amount_cents"])
+            if a.get("chargeback_code"):
+                self.escalate_chargeback(a["chargeback_code"], line, decision_id)
             cancelled = self.wp.cancel_schedule(self.principal, schedule["id"])
             self.emit("ENTRY", f"{schedule['id']} cancelled ({cancelled})")
             decision_ids.append(decision_id)

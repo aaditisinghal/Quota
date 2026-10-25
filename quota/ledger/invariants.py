@@ -143,7 +143,7 @@ def tie_outs(conn, t=None) -> list[dict]:
         ("Deferred commissions (1350)", "unamortized schedules + recoveries awaiting approval", _gl(tb, "1350"),
          remaining + in_transit),
         ("Commissions payable (2150)", "approved, unpaid commission lines", -_gl(tb, "2150"), payable),
-        ("Due from employees (1290)", "approved recovery lines", _gl(tb, "1290"), recoverable),
+        ("Commission advances recoverable (1290)", "approved recovery lines", _gl(tb, "1290"), recoverable),
         ("Accounts receivable (1200)", "invoices less payments in billing", _gl(tb, "1200"), receivable),
     ]
     return [{"name": n, "subledger": s, "gl_cents": g, "subledger_cents": v, "ok": g == v} for n, s, g, v in pairs]

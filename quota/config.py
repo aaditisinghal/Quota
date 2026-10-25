@@ -3,7 +3,7 @@
 ACCOUNTS = {
     "1000": ("Cash", "asset"),
     "1200": ("Accounts receivable", "asset"),
-    "1290": ("Due from employees", "asset"),
+    "1290": ("Commission advances recoverable", "asset"),
     "1350": ("Deferred commissions", "asset"),      # single account in Phase 1; current/noncurrent split is cut
     "2150": ("Commissions payable", "liability"),
     "2400": ("Deferred revenue", "liability"),
@@ -29,7 +29,7 @@ PRINCIPALS = {
     },
     "seat:deferred_accountant": {
         "kind": "agent seat", "limit": None,
-        "capabilities": frozenset({"read:*", "draft:journal_entry", "record:decision", "claim:event"}),
+        "capabilities": frozenset({"read:*", "draft:journal_entry", "draft:message", "record:decision", "claim:event"}),
     },
     "system:billing": {"kind": "simulated ERP", "limit": None,
                        "capabilities": frozenset({"post:source_entry", "claim:event"})},
