@@ -39,7 +39,8 @@ def cmd_demo(args) -> int:
                   f"answers already received are cached.")
             return 2
     else:
-        demo = demo_acme.run(db_path=args.db, stripe=stripe)
+        demo = demo_acme.AcmeDemo(args.db, stripe=stripe).run(checkpoint_dir=".checkpoints")
+        print("\nCheckpoints written to .checkpoints/ (cp_dispute, cp_routed, cp_april_close, cp_may_close, cp_end)")
     if stripe:
         print(f"\nStripe sandbox run {stripe.run_tag}: {stripe.created}")
     if args.db:

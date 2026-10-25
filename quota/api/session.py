@@ -31,10 +31,19 @@ HUMAN_KINDS = {"human"}
 
 
 class Session:
-    def __init__(self, world, name: str, mode: str = "scripted", llm=None, seed: int | None = None):
+    def __init__(self, world, name: str, mode: str = "scripted", llm=None, seed: int | None = None, restart=None):
         self.world, self.name, self.mode, self.llm, self.seed = world, name, mode, llm, seed
+        self.restart = restart   # builds this session's start again (POST /demo/reset)
+        self.scenario: str | None = None
+        self.checkpoint_dir = ".checkpoints"     # R4 snapshots (quota.sim.checkpoints)
         self.lock = threading.RLock()
         world.strict = False     # judges type things: a failing event is logged and contained, never fatal
+
+    def swap(self, world, scenario: str | None) -> None:
+        """Serve another world from now on (a scenario's, or the start again); the old one is closed."""
+        old, self.world, self.scenario = self.world, world, scenario
+        world.strict = False
+        old.close()
 
     @property
     def ro(self):
@@ -52,7 +61,7 @@ class Session:
 
     def state(self) -> dict:
         now = self.world.clock.now()
-        return {"world": self.name, "mode": self.mode, "seed": self.seed, "clock": now,
+        return {"world": self.name, "mode": self.mode, "seed": self.seed, "scenario": self.scenario, "clock": now,
                 "timeline_length": len(self.world.feed), "principals": self.principals(),
                 "pending_approvals": [{"id": a["id"], "kind": a["kind"], "subject": a["subject_id"],
                                        "approver": a["approver"], "amount_cents": a["amount_cents"],
@@ -87,7 +96,8 @@ def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None, ca
     world.queue.unschedule(INJECTED_BY_PEOPLE)
     later = [a for a in script["people"]["actions"] if a["at"] > ACME_START and a["do"] != "message"]
     world.people = PolicyPeople(world, later, ROUTINE_APPROVALS, releases=FINAL_PAY_RELEASES)
-    session = Session(world, "acme", mode, llm)
+    session = Session(world, "acme", mode, llm,
+                      restart=lambda: acme_session(mode, llm, stripe, cast=cast).world)
     if mode == "live":
         session.analyst.extractor, session.analyst.llm = ModelExtractor(llm), llm
     else:

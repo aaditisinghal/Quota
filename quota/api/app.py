@@ -10,7 +10,8 @@ from pydantic import BaseModel
 
 from quota import clock as clk
 from quota.api import chat as chat_turn
-from quota.api import inject, views
+from quota.api import inject, scenarios, views
+from quota.sim import checkpoints
 
 STATIC = Path(__file__).with_name("static")
 
@@ -38,6 +39,20 @@ class ParseIn(BaseModel):
 class RunIn(BaseModel):
     events: list[dict]
 
+
+class StepIn(BaseModel):
+    n: int
+
+
+# The guided demo (R4): the start, then each checkpoint of the scripted story, with what to say there.
+DEMO_STEPS = [
+    ("start", "Monday 2026-04-27, just after the April commission run: Acme is booked in Q2 at $12,000."),
+    ("cp_dispute", "Jordan disputes the booking date, is held twice on the evidence, and escalates."),
+    ("cp_routed", "Marcus grants the Q1 exception; $6,000 is over his limit, so A-0002 goes to Priya."),
+    ("cp_april_close", "April closes: Acme counts in Q1 at $18,000, accrued and capitalized over 36 months."),
+    ("cp_may_close", "May payroll paid Jordan; two months of amortization are posted."),
+    ("cp_end", "Acme churns June 30: refund, clawback to 1290, and every invariant still holds."),
+]
 
 def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
     app = FastAPI(title="Quota", version="0.4")
@@ -120,6 +135,47 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
     def post_parse(body: ParseIn):
         with session.lock:
             return inject.parse(session, body.text)
+
+    def scenario_menu():
+        return [s.card() for s in scenarios.SCENARIOS]
+
+    def scenario_run(name: str):
+        if name not in scenarios.BY_NAME:
+            raise HTTPException(404, f"no scenario {name!r}; try {sorted(scenarios.BY_NAME)}")
+        with session.lock:
+            demo, result = scenarios.run(name, session.checkpoint_dir)
+            session.swap(demo.world, name)
+            return result
+
+    def demo_reset():
+        if session.restart is None:
+            raise HTTPException(400, f"the {session.name} world has no start to restore")
+        with session.lock:
+            session.swap(session.restart(), None)
+            return {"clock": session.world.clock.now(), "timeline": views.timeline(session.world, 0)}
+
+    def demo_steps():
+        return [{"n": n, "checkpoint": cp, "narration": text} for n, (cp, text) in enumerate(DEMO_STEPS)]
+
+    def demo_step(body: StepIn):
+        if not 0 <= body.n < len(DEMO_STEPS):
+            raise HTTPException(400, f"steps are 0..{len(DEMO_STEPS) - 1}")
+        checkpoint, narration = DEMO_STEPS[body.n]
+        with session.lock:
+            if checkpoint == "start":
+                demo_reset()
+            else:
+                checkpoints.ensure_snapshots(session.checkpoint_dir)
+                session.swap(checkpoints.restore(checkpoint, directory=session.checkpoint_dir).world, checkpoint)
+            return {"n": body.n, "checkpoint": checkpoint, "narration": narration,
+                    "clock": session.world.clock.now(), "timeline": views.timeline(session.world, 0)}
+
+    for prefix in ("/api", ""):        # NEXT_TASKS names /api/...; the UI calls the root paths like the rest
+        app.get(f"{prefix}/scenarios")(scenario_menu)
+        app.post(f"{prefix}/scenarios/{{name}}/run")(scenario_run)
+        app.post(f"{prefix}/demo/reset")(demo_reset)
+        app.get(f"{prefix}/demo/steps")(demo_steps)
+        app.post(f"{prefix}/demo/step")(demo_step)
 
     @app.post("/inject/run")
     def post_run(body: RunIn):

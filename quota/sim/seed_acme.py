@@ -61,7 +61,8 @@ def opening_line(wp, clock, emit, deal_id) -> str:
     return line_id
 
 
-def seed(wp, clock, emit) -> None:
+def seed(wp, clock, emit, acme_countersigned_at=None, acme_customer_signed_at=None) -> None:
+    """The scenario `tz_acme` (R4) moves Acme's countersignature (and the customer's signature before it)."""
     clock.advance_to(SEED_START)
     for person in PEOPLE:
         row = {"id": person, "name": config.display_name(person), "role": config.title(person), "state": None,
@@ -116,11 +117,11 @@ def seed(wp, clock, emit) -> None:
     emit(SEED, "FACT", "deals acme v1 Acme Robotics: CRM $150,000.00, close 2026-03-31, closed_won, "
                        "jordan.kim 100%")
 
-    clock.advance_to("2026-04-01T19:40:00Z")
+    clock.advance_to(acme_customer_signed_at or "2026-04-01T19:40:00Z")
     wp.append_fact("esign_events", _esign("customer_signed", clock.now()), SEED)
     emit(SEED, "FACT", "esign ENV-ACME-001 customer_signed")
 
-    clock.advance_to("2026-04-02T17:14:00Z")
+    clock.advance_to(acme_countersigned_at or "2026-04-02T17:14:00Z")
     wp.append_fact("esign_events", _esign("countersigned", clock.now()), SEED)
     wp.append_fact("contracts", _contract(
         "acme", 12_000_000, 36, "2026-04-01", clock.now(),

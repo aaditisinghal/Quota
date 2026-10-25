@@ -13,3 +13,6 @@ runs/
 
 # browser walkthrough reports (gstack /browse)
 .gstack/
+
+# R4 checkpoint snapshots (rebuilt by `python -m quota demo acme`)
+.checkpoints/

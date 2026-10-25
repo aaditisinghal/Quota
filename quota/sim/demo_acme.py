@@ -30,8 +30,12 @@ def load_script(path=SCRIPT_PATH) -> dict:
 
 
 class AcmeDemo:
-    def __init__(self, db_path=None, out=print, mode="scripted", llm=None, script_path=SCRIPT_PATH, stripe=None):
+    def __init__(self, db_path=None, out=print, mode="scripted", llm=None, script_path=SCRIPT_PATH, stripe=None,
+                 edit=None):
         script = load_script(script_path)
+        if edit is not None:          # a rehearsed scenario (R4) starts from a changed script
+            edit(script)
+        self.script = script
         self.world = World(seed_acme.SEED_START, db_path, out, stripe=stripe)
         live = mode == "live"
         extractor = ModelExtractor(llm) if live else ScriptedExtractor(script["extractions"])
@@ -65,8 +69,13 @@ class AcmeDemo:
     def close(self):
         self.world.close()
 
-    def run(self):
+    def run(self, checkpoint_dir=None):
         seed_acme.seed(self.world.wp, self.world.clock, self.world.emit)
+        if checkpoint_dir is not None:    # R4: snapshot the ledger at each named checkpoint on the way
+            from quota.sim import checkpoints
+            for name, at in checkpoints.CHECKPOINTS.items():
+                self.world.run_until(at)
+                checkpoints.snapshot(self.world, name, checkpoint_dir)
         self.world.run_until(REPORT_AT)
         self.report()
         return self
