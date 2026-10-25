@@ -23,3 +23,17 @@ out/
 
 # C6 Stripe Connect sandbox account ids (python -m quota stripe connect-setup)
 .stripe_accounts.json
+
+# Working notes kept on this machine only (not published)
+/ASSUMPTIONS.md
+/quota-calhacks-chat-handoff.md
+/NEXT_TASKS.md
+/CUA_TASKS.md
+/HR_TASKS.md
+/ELASTIC_TASKS.md
+/ELASTIC_FIX.md
+/DEMO_FLOW_TASKS.md
+/SPEC.md
+/IMPLEMENTATION.md
+/DEMO_SCRIPT.md
+/docs/PITCH.md

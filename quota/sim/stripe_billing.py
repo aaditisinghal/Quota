@@ -52,7 +52,7 @@ class StripeSandbox:
             raise StripeSandboxError("--stripe only runs against a sandbox / test key (sk_test_ or rk_test_)")
         if self.client is None:
             import stripe
-            self.client = stripe.StripeClient(self.api_key, max_network_retries=3)
+            self.client = stripe.StripeClient(self.api_key, max_network_retries=10)   # long runs ride out network blips
 
     @classmethod
     def from_env(cls, run_tag: str) -> "StripeSandbox":

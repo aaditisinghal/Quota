@@ -259,6 +259,16 @@ def _create_account(v1, person: dict):
     try:
         return v1.accounts.create(params=params)
     except Exception as exc:                        # stripe.StripeError subclasses
+        if "recipient ToS agreement is not supported" in str(exc):
+            # A US platform paying US recipients uses the standard (full) service agreement; the recipient one
+            # is for cross-border payouts. Same account otherwise.
+            params["tos_acceptance"]["service_agreement"] = "full"
+            try:
+                return v1.accounts.create(params=params)
+            except Exception as retry:
+                if _connect_error(retry):
+                    raise ConnectNotEnabled(f"{NOT_READY}: {retry}") from retry
+                raise
         if _connect_error(exc):
             raise ConnectNotEnabled(f"{NOT_READY}: {exc}") from exc
         raise
@@ -374,7 +384,9 @@ def _payment(v1, customer, metadata: dict):
             return intent, False
     intent = v1.payment_intents.create(params={
         "amount": ACV_CENTS, "currency": "usd", "customer": customer.id, "payment_method": TEST_CARD,
-        "payment_method_types": ["card"], "confirm": True, "transfer_group": DEAL_ID,
+        # Newer API versions refuse payment_method_types; a card with redirects off is the equivalent.
+        "automatic_payment_methods": {"enabled": True, "allow_redirects": "never"}, "confirm": True,
+        "transfer_group": DEAL_ID,
         "description": f"{DEAL_NAME}: year-1 ACV", "metadata": metadata})
     if intent.status != "succeeded":
         raise StripeSandboxError(f"the Orbit payment {intent.id} is {intent.status}, not succeeded")
