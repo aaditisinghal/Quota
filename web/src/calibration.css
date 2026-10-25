@@ -1,0 +1,49 @@
+/* D5: the calibration panel. Scoped under .calib; the accent is only for an outcome that needs a person. */
+
+.calib { display: flex; flex-direction: column; gap: 14px; }
+.calib-sec { border-top: 1px solid var(--line); padding-top: 10px; }
+.calib-sec:first-child { border-top: 0; padding-top: 0; }
+.calib-sec h4 {
+  margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.calib-sec h4 .conf { text-transform: none; letter-spacing: 0; }
+.calib .table { width: 100%; border-collapse: collapse; }
+
+/* Evidence: source, what it says, agrees or not (in words), the raw ref. */
+.calib-evidence td { font-size: 13px; }
+.calib-src { white-space: nowrap; font-weight: 500; color: var(--ink); }
+.calib-src .muted { font-size: 11.5px; font-weight: 400; }
+.calib-agree { white-space: nowrap; font-size: 12.5px; }
+.calib-agree.yes { color: var(--ink-2); }
+.calib-agree.no { color: var(--ink); font-weight: 600; }
+.calib-ref { font-size: 11.5px; overflow-wrap: anywhere; }
+.calib-kv { display: inline-flex; flex-wrap: wrap; gap: 2px 12px; }
+
+/* Rules that settled each disagreement. */
+.calib-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.calib-rules li { padding-left: 10px; border-left: 2px solid var(--line); }
+.calib-rules .mono { font-size: 12px; }
+
+/* Amount: the total large, the portions and rate under it. */
+.calib-total { font-size: 26px; line-height: 1.2; font-weight: 650; color: var(--ink); }
+.calib-total a.money { border-bottom-width: 2px; font-weight: 650; }
+.calib-parts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 6px 0 0; }
+.calib-parts > div { display: flex; flex-direction: column; }
+.calib-parts dt { font-size: 11.5px; color: var(--ink-2); }
+.calib-parts dd { margin: 0; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+
+/* Outcome. Held: someone has to answer, so it carries the accent. */
+.calib-outcome-text { margin: 0 0 6px; }
+.calib-outcome.held {
+  border: 1px solid var(--accent-line); background: var(--accent-bg); border-radius: 8px; padding: 10px 12px;
+}
+.calib-outcome.held h4 { color: var(--accent); }
+.calib-asked { margin-bottom: 8px; }
+.calib-answer { display: flex; flex-direction: column; gap: 6px; }
+.calib-answer textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+.calib-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Dispute thread. */
+.calib-case { margin-left: auto; font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.calib-thread .thread { margin: 4px 0 0; max-height: 40vh; }
