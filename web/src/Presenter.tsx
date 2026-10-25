@@ -128,7 +128,9 @@ export function Presenter({ onMoved, onClose, paused }: Props) {
 
   const goCfo = useCallback(
     async (n: number) => {
-      // Reset always restores the start, even from a step that shares its state.
+      // Reset always restores the start, even from a step that shares its state. The server keeps one morning
+      // build across its steps 0-5 (answers persist through the walk), so a full reset comes first to rebuild it.
+      if (n === 0) await api.reset();
       for (const action of actionsBetween(CFO_SCRIPT, current, n, n === 0)) await runAction(action);
       window.location.hash = CFO_SCRIPT[n].hash;
       if (n === 0) setStarted(null);
