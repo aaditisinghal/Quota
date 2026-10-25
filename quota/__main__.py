@@ -137,6 +137,20 @@ def cmd_backtest(args) -> int:
     return 0
 
 
+def cmd_elastic(args) -> int:
+    from quota.search import elastic_client
+    if not elastic_client.configured():
+        print("Elastic is not configured: set ELASTICSEARCH_URL and ELASTIC_API_KEY in .env")
+        return 2
+    if args.action == "ping":
+        p = elastic_client.ping()
+        print(f"cluster {p['cluster']} (v{p['version']}); embeddings {p['embeddings'] or 'default semantic_text model'}; "
+              f"reranker {p['reranker'] or 'none'}; Agent Builder GET /api/agent_builder/agents -> {p['agent_builder']}")
+        return 0 if p["agent_builder"] == 200 else 1
+    from quota.search import cli
+    return cli.run(args)
+
+
 def cmd_serve(args) -> int:
     import uvicorn
     from quota.api import session as sessions
@@ -221,6 +235,13 @@ def main(argv=None) -> int:
     back.add_argument("--out", default="out")
     back.add_argument("--live", action="store_true")
     back.set_defaults(fn=cmd_backtest)
+
+    elastic = sub.add_parser("elastic", help="the Elastic evidence layer (ELASTIC_TASKS)")
+    elastic.add_argument("action", choices=["ping", "setup", "ingest", "verify", "eval-search", "agent-setup",
+                                            "sweep"])
+    elastic.add_argument("path", nargs="?", help="ingest: the messages JSONL")
+    elastic.add_argument("--seed", type=int, default=7)
+    elastic.set_defaults(fn=cmd_elastic)
 
     serve = sub.add_parser("serve", help="serve the API and screens over one running world")
     serve.add_argument("--world", choices=["acme", "fernhill"], default="acme")
