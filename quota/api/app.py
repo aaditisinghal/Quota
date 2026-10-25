@@ -48,6 +48,11 @@ class ReviewIn(BaseModel):
     resolution: dict
 
 
+class AuditorIn(BaseModel):
+    message: str
+    conversation_id: str | None = None
+
+
 # The guided demo (R4): the start, then each checkpoint of the scripted story, with what to say there.
 DEMO_STEPS = [
     ("start", "Monday 2026-04-27, just after the April commission run: Acme is booked in Q2 at $12,000."),
@@ -180,10 +185,21 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
             if checkpoint == "start":
                 demo_reset()
             else:
+                session.poll_findings()                    # E6: once at each demo step
                 checkpoints.ensure_snapshots(session.checkpoint_dir)
                 session.swap(checkpoints.restore(checkpoint, directory=session.checkpoint_dir).world, checkpoint)
             return {"n": body.n, "checkpoint": checkpoint, "narration": narration,
                     "clock": session.world.clock.now(), "timeline": views.timeline(session.world, 0)}
+
+    def auditor(body: AuditorIn):
+        """E6: one turn with the auditor agent in Agent Builder (read only; it never changes the ledger)."""
+        from quota.search import agent_setup, elastic_client
+        if not elastic_client.configured():
+            raise HTTPException(503, "Elastic is not configured: set ELASTICSEARCH_URL and ELASTIC_API_KEY in .env")
+        try:
+            return agent_setup.converse(elastic_client.kibana, body.message, body.conversation_id)
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {str(exc)[:300]}"}
 
     def elastic_verify():
         from quota.search import elastic_client
@@ -225,6 +241,7 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
     for prefix in ("/api", ""):        # NEXT_TASKS names /api/...; the UI calls the root paths like the rest
         app.get(f"{prefix}/intake")(intake_view)
         app.get(f"{prefix}/elastic/verify")(elastic_verify)
+        app.post(f"{prefix}/auditor")(auditor)
         app.post(f"{prefix}/review/{{item_id}}")(review_resolve)
         app.get(f"{prefix}/scenarios")(scenario_menu)
         app.post(f"{prefix}/scenarios/{{name}}/run")(scenario_run)

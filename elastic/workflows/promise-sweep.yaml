@@ -1,0 +1,46 @@
+version: "1"
+name: promise-sweep
+description: Finds sales messages that promise customers terms outside the signed contract; saves candidates for Quota.
+enabled: true
+tags: ["calhacks", "quota"]
+triggers:
+  - type: manual
+  - type: scheduled
+    with: { every: 1d }
+inputs:
+  - name: since
+    type: string
+    default: "now-1d"
+steps:
+  - name: find_candidates
+    type: elasticsearch.search
+    with:
+      index: quota-comms
+      size: 25
+      query:
+        bool:
+          filter:
+            - range: { sent_at: { gte: '{{ inputs.since | default: "now-1d" }}' } }
+          must:
+            - semantic:
+                field: content
+                query: "promise to a customer of terms not in the signed contract: free exit or cancellation, free months, credits, price lock, delayed payment, free add-on"
+      _source: ["doc_id", "account", "deal_id", "rep_id", "sent_at", "subject", "body"]
+  - name: judge
+    type: ai.agent
+    agent-id: quota-auditor
+    with:
+      message: |
+        For each message below, decide if the sender promises the customer a benefit that a signed contract would normally need to state.
+        Refusals, proposals, pointers to the contract and demos are NOT promises.
+        Reply with ONLY a JSON array: [{"doc_id": "...", "type": "early_exit|free_period|credit|price_lock|payment_terms|free_addon", "quote": "<exact words from the body>"}]. Use [] if none.
+        Messages:
+        {{ steps.find_candidates.output.hits.hits | json }}
+  - name: save
+    type: elasticsearch.index
+    with:
+      index: quota-findings
+      document:
+        query: "promise-sweep"
+        raw: "{{ steps.judge.output.message }}"
+        status: "new"

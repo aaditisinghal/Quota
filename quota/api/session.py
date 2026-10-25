@@ -56,6 +56,22 @@ class Session:
         self.provenance = intake.provenance()
         return self.intake
 
+    def poll_findings(self, out=print) -> list[str]:
+        """E6: pull the promise sweep's new findings into the served world as evidence.found events (when Elastic
+        is configured and the world has evidence); the seats then run under the lock."""
+        from quota.search import elastic_client
+        if getattr(self.world, "evidence", None) is None or not elastic_client.configured():
+            return []
+        from quota.search.findings import ElasticFindings, poll
+        with self.lock:
+            try:
+                passed = poll(ElasticFindings(elastic_client.es()), self.world.evidence, self.world, out)
+            except Exception as exc:
+                out(f"findings poll skipped: {type(exc).__name__}: {str(exc)[:160]}")
+                return []
+            self.world.settle()
+            return passed
+
     def swap(self, world, scenario: str | None) -> None:
         """Serve another world from now on (a scenario's, or the start again); the old one is closed."""
         old, self.world, self.scenario = self.world, world, scenario

@@ -53,7 +53,7 @@ def calc_text(calc) -> str:
 
 
 FACT_ROUTES = {"deal.updated": "deal_updated", "payment.overdue": "overdue", "rep.terminated": "terminated",
-               "payment.received": "payment",
+               "payment.received": "payment", "evidence.found": "evidence",
                "rep.territory_changed": "territory", "plan.amended": "plan_amended", "rep.leave": "leave"}
 
 
@@ -897,7 +897,12 @@ class CommissionsAnalyst(Seat):
             out[deal_id] = d
         return out
 
-    def commitment_gate(self, deal_id) -> str | None:
+    def write_evidence(self, ctx):
+        """E6: the sweep found something on this deal; run the gate, with the swept message in its hits."""
+        gated = self.commitment_gate(ctx.event.payload["deal_id"], include=[ctx.event.payload["doc_id"]])
+        return [gated] if gated else []
+
+    def commitment_gate(self, deal_id, include=()) -> str | None:
         """Search the deal's messages since 30 days before booking for each promise intent, read the hits, and
         hold the deal's commission on any promise the signed contract does not make. Returns the decision id
         when it recorded one (a new hold, or a release when a re-check finds the contract now covers it)."""
@@ -918,6 +923,13 @@ class CommissionsAnalyst(Seat):
         else:                                             # Elastic: hybrid + rerank, every intent, top 5 each
             hits = merge({intent: evidence.search(text, "hybrid", k=5, account=deal["account"], after=after,
                                                   before=self.now) for intent, text in INTENTS.items()})
+        seen = {h["doc_id"] for h in hits}
+        for doc_id in include:                            # a message the sweep found, even if ranking missed it
+            doc = evidence.get(doc_id)
+            if doc is not None and doc_id not in seen:
+                from quota.search.indexes import body_sha256
+                hits.append({**doc, "body_sha256": doc.get("body_sha256") or body_sha256(doc["body"]),
+                             "mode": "sweep", "rank": None, "score": None})
         findings = [f for f in (commitments.classify(h, contract, self.world.commitment_llm) for h in hits) if f]
         previous = self.decisions(kind="commitment_check", subject_id=deal_id)
         last = previous[-1] if previous else None

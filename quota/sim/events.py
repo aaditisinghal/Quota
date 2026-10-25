@@ -37,6 +37,9 @@ EVENT_SCHEMAS = {
     "payment.received": _BILLING,
     "refund.issued": _BILLING,
     "payment.overdue": _schema({"deal_id": STRING, "days": INTEGER}),
+    # ELASTIC_TASKS E6: the promise sweep found a message that passed Quota's own checks; the seat's gate decides.
+    "evidence.found": _schema({"doc_id": STRING, "deal_id": STRING, "account": STRING, "type": STRING,
+                               "quote": STRING, "finding_id": STRING}),
     "customer.churned": _schema({"deal_id": STRING, "effective_date": STRING, "reason": STRING,
                                  "refund_cents": INTEGER}),
     "rep.terminated": _schema({"rep_id": STRING, "end_date": STRING, "state": STRING}),

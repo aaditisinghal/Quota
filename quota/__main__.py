@@ -191,6 +191,13 @@ def cmd_serve(args) -> int:
         intake = session.attach_inbox(args.from_inbox, llm)
         print(f"Inbox {args.from_inbox}: {sum(intake['report']['loaded'].values())} facts with their file and row; "
               f"{len(intake['report']['review_items'])} review items. {intake['backtest']['headline']}")
+    import threading
+
+    def findings_poller():               # E6: every 60 s, pull the promise sweep's findings
+        stop = threading.Event()
+        while not stop.wait(60):
+            session.poll_findings()
+    threading.Thread(target=findings_poller, daemon=True).start()
     print(f"Clock at {session.world.clock.now()}; serving on http://{args.host}:{args.port}")
     uvicorn.run(create_app(session, runs_dir=args.runs), host=args.host, port=args.port, log_level="warning")
     return 0

@@ -58,6 +58,26 @@ def verify(args):
     return 0 if result["ok"] else 1
 
 
+@action("agent-setup")
+def agent_setup(args):
+    from quota.search import agent_setup as setup_module
+    from quota.search.elastic_client import kibana
+    result = setup_module.setup(kibana)
+    print("MCP: claude mcp add --transport http quota-auditor \"$KIBANA_URL/api/agent_builder/mcp\" --header "
+          "\"Authorization: ApiKey $ELASTIC_API_KEY\"")
+    return 0 if result["agent"] and result["smoke"] == 200 else 1
+
+
+@action("sweep")
+def sweep(args):
+    """Run the promise-sweep Workflow now (through its agent tool); the poller picks up what it saves."""
+    from quota.search.elastic_client import kibana
+    r = kibana("POST", "/api/agent_builder/tools/_execute",
+               json={"tool_id": "quota_run_promise_sweep", "tool_params": {"since": "now-200d"}})
+    print(f"promise-sweep: {r.status_code} {r.text[:300]}")
+    return 0 if r.ok else 1
+
+
 @action("eval-search")
 def eval_search(args):
     import json
