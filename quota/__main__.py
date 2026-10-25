@@ -146,6 +146,16 @@ def _mirror(conn) -> None:
         print(f"Elastic mirror: {pushed} documents pushed to quota-decisions")
 
 
+def cmd_export_roster(args) -> int:
+    from quota.hr import roster
+    data = roster.build(args.seed, args.inbox)
+    path = roster.write(data, args.out)
+    counts = {d: sum(p["department"] == d for p in data["people"]) for d in data["departments"]}
+    print(f"Wrote {len(data['people'])} people to {path}: " + ", ".join(f"{n} {d}" for d, n in counts.items())
+          + f"; {sum(len(p['commission']) for p in data['people'])} Q1 commission rows")
+    return 0
+
+
 def cmd_gen_messages(args) -> int:
     from quota.sim import messages
     corpus, key = messages.corpus_for(args.world, args.seed)
@@ -259,6 +269,13 @@ def main(argv=None) -> int:
     back.add_argument("--out", default="out")
     back.add_argument("--live", action="store_true")
     back.set_defaults(fn=cmd_backtest)
+
+    roster_cmd = sub.add_parser("export-roster", help="the HR roster for the BambooHR clone (CUA_TASKS C1)")
+    roster_cmd.add_argument("--world", default="acme+fernhill", choices=["acme+fernhill"])
+    roster_cmd.add_argument("--seed", type=int, default=7)
+    roster_cmd.add_argument("--inbox", default="inbox", help="where payouts_2026Q1.csv is (exported if missing)")
+    roster_cmd.add_argument("--out", default="out/hr_roster.json")
+    roster_cmd.set_defaults(fn=cmd_export_roster)
 
     gen = sub.add_parser("gen-messages", help="the sales email and Slack corpus with planted promises (E1)")
     gen.add_argument("--world", choices=["fernhill", "acme"], default="fernhill")
