@@ -80,9 +80,26 @@ EDGAR; paraphrased):
 ## Screens
 
 `python -m quota serve`, then open http://127.0.0.1:8000. The Acme world is paused at 2026-04-27 17:00, right
-after the April commission run drafted Jordan's $12,000 Q2 line, and you play the people. Five tabs, with the
-printed timeline on the right of each but the first:
+after the April commission run drafted Jordan's $12,000 Q2 line, and you play the people. Seven tabs, with the
+printed timeline on the right of each but Home, Reps and Case. Home opens first:
 
+- **Home.** The CFO's morning. A KPI strip for the period (pending commission, cleared by evidence, held with
+  counts by reason, needs you), each figure the server's; the dollar figures open the screen behind them. A
+  sources rail, one card per input (contracts, messages, CRM, HR, billing, the Q1 payout spreadsheet) with its
+  count, how it arrived and last sync, tagged "simulated" where it is. Opening a card shows the raw viewer: the
+  rows as they arrived, filterable, with the columns Quota extracted marked, and for messages the quoted span
+  marked inside the text. On the right, **Needs you**: everything waiting on a person, grouped by person, each
+  with its question, dollar impact, evidence and approval chain, answered in place (a refusal stays on the card
+  with its reason).
+- **Reps.** The board: every rep in needs-attention order, with open pipeline by stage (simulated), booked this
+  quarter, attainment, pending commission, lowest confidence and status. A rep's page has the pipeline lane (open
+  deals by stage, each with a forecast commission marked "not earned") and one card per booked contract: ACV,
+  term, billing, clauses, countersigned date, collection, the commission line and a confidence badge (score and
+  band in words). Connected-people chips open each other rep's view of the same contract; the split bar shows
+  every recipient's share (Orbit: Alex 60%, Riley 40%); an expansion shows as a child card with incremental
+  commission only. The badge opens the **calibration panel**: what each source says (agrees or disagrees, in
+  words), the rule that settled each field, the amount's base and accelerator portions, the six confidence
+  factors, the outcome with an answer box for the person asked, and the rep's dispute thread.
 - **Case.** The disputed line in one screen. Evidence: the CRM record ("Close date Mar 31", outranked) next to
   the signed contract ("Countersigned Apr 2, 10:14 AM PT", used), under the rule that decides. Decision: the
   figure ($12,000.00 vs $18,000.00 claimed) and the approval chain in order: held twice, escalated, Marcus
@@ -105,7 +122,11 @@ read in company time (`Apr 2, 10:14 AM PT`, ISO on hover), negatives in parenthe
 raw line is under "Details". A figure that changes flashes and counts to its new value.
 
 **Presenter mode** ("Present" in the header): a bottom bar with Back, Next and Reset (← → R), the step number
-and one narration line per step; each Next runs the next scripted event from its checkpoint. **Scenarios**
+and one narration line per step; each Next runs the next scripted event from its checkpoint. A Demo / CFO
+switcher picks the script: Demo is the one above, and **CFO** walks Home, the raw viewer, the reps board, Jordan's
+Acme calibration, Orbit's split from both reps' views, Riley's held Summit line, June and Birch churning, a trace
+with as-of, the scorecard, and Home again with Needs you at 0 (`tests/test_e2e_cfo.py` clicks through it in a
+headless Chromium). **Scenarios**
 (⌘K / Ctrl+K): the rehearsed scenarios by phrase; choosing one runs it and opens the tab where its result shows.
 
 **Walkthrough (done in a headless Chromium, by clicking).**
@@ -132,6 +153,10 @@ routine approvals come 30 minutes after a request, so April's $500 amortization 
 | Case view: held, routed to the Controller | Over the limit, routed on | Churn: ledger health | Trace as of April 30 |
 | --- | --- | --- | --- |
 | ![](docs/screens/1-dispute.png) | ![](docs/screens/2-over-limit.png) | ![](docs/screens/3-churn-ledger-health.png) | ![](docs/screens/4-trace-as-of-april-30.png) |
+
+| Home: KPIs, sources, Needs you | Rep detail: pipeline and contracts | Calibration panel |
+| --- | --- | --- |
+| ![](docs/screens/5-home.png) | ![](docs/screens/6-rep-detail.png) | ![](docs/screens/7-calibration.png) |
 
 ## Scope: what Quota owns, and when it asks
 
