@@ -136,7 +136,7 @@ export function RepView({ rep, contract, calibrate, people, version, onChange }:
             <ContractView c={c} rep={rep} people={people} focused={contract === c.id} />
             {c.children.map((child) => (
               <div key={child.id} className="child">
-                <ChildView child={child} parent={c} />
+                <ChildView child={child} parent={c} rep={rep} people={people} focused={contract === child.id} />
               </div>
             ))}
           </div>
@@ -260,10 +260,10 @@ function ContractView({ c, rep, people, focused }: { c: ContractCard; rep: strin
 }
 
 /** An amendment under its parent: only the incremental commission it adds (E12). */
-function ChildView({ child, parent }: { child: ContractChild; parent: ContractCard }) {
+function ChildView({ child, parent, rep, people, focused }: { child: ContractChild; parent: ContractCard; rep: string; people: Principal[]; focused: boolean }) {
   const lines = child.incremental_lines.map((l) => (typeof l === "string" ? l : l.id));
   return (
-    <div className="card contract expansion">
+    <div id={`contract-${child.id}`} className={`card contract expansion ${focused ? "focused" : ""}`}>
       <div className="card-head">
         <span className="tag">expansion v{child.version}</span>
         <strong>{parent.customer}</strong>
@@ -283,13 +283,28 @@ function ChildView({ child, parent }: { child: ContractChild; parent: ContractCa
           <dd>
             <Money cents={child.incremental_commission_cents} trace={lines[0] ?? `deal/${parent.id}`} />{" "}
             {lines.map((id) => (
-              <a key={id} className="ref" href={`#trace/${encodeURIComponent(id)}`}>
-                {id}
-              </a>
+              <span key={id}>
+                {" "}
+                <a className="ref" href={`#trace/${encodeURIComponent(id)}`}>
+                  {id}
+                </a>
+              </span>
             ))}
           </dd>
         </div>
       </dl>
+      {(child.recipients ?? []).length > 0 && (
+        <div className="chips connected">
+          {(child.recipients ?? []).map((r) => (
+            <span key={r.who} className="chip-with-amount">
+              <PersonChip r={r} contract={parent.id} rep={rep} people={people} />
+              {r.amount_cents !== undefined && (
+                <Money cents={r.amount_cents} trace={r.line ?? lines[0] ?? `deal/${parent.id}`} />
+              )}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

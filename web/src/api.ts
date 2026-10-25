@@ -350,6 +350,7 @@ export type Recipient = {
   note?: string;
   line: string | null;
   confidence: Confidence | null;
+  amount_cents?: number;
   transfer?: string | null;
 };
 
@@ -360,6 +361,7 @@ export type ContractChild = {
   acv_cents: number;
   incremental_lines: string[] | { id: string; amount_cents: number }[];
   incremental_commission_cents: number;
+  recipients?: Recipient[];
 };
 
 export type ContractCard = {

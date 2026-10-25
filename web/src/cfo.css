@@ -187,3 +187,4 @@ a.segment:not([href]) { cursor: default; }
 .tabs .nav-external { margin-left: auto; display: flex; gap: 6px; align-items: center; padding: 6px 0; }
 .tabs .ext-link { font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; text-decoration: none; color: var(--ink-2); background: var(--panel); white-space: nowrap; }
 .tabs .ext-link:hover { border-color: var(--ink-3); color: var(--ink); }
+.chip-with-amount { display: inline-flex; align-items: center; gap: 6px; }

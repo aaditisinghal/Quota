@@ -27,7 +27,7 @@ export const CFO_SCRIPT: CfoStep[] = [
   },
   { narration: "Orbit: one split bar, Alex 60% and Riley 40%.", hash: "rep/alex.chen/orbit" },
   { narration: "Riley's view of the same contract.", hash: "rep/riley.shah/orbit" },
-  { narration: "Summit: an off-contract promise in Riley's email; 40, held for Priya.", hash: "rep/riley.shah/summit/calibration" },
+  { narration: "The May amendment: incremental commission only, credited on the same split.", hash: "rep/alex.chen/orbit+v2" },
   { narration: "Needs you: the Summit side letter and the Acme exception chain, by person.", hash: "home" },
   { narration: "June: Acme churns; one event, eight numbers.", hash: "today", server: { cfoStep: 6 } },
   {
