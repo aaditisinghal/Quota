@@ -1,0 +1,49 @@
+{
+  "model": "claude-opus-5-5",
+  "output": {
+    "is_commitment": false,
+    "promised_by": "wren.holt",
+    "quote": "",
+    "to_customer": false,
+    "type": "none"
+  },
+  "prompt": "Kind: slack\nFrom: wren.holt\nTo: morgan.diaz\nAccount: Northwind Textiles\nSubject: \n\nNorthwind asked about cancelling early; I said no.",
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "is_commitment": {
+        "type": "boolean"
+      },
+      "promised_by": {
+        "type": "string"
+      },
+      "quote": {
+        "type": "string"
+      },
+      "to_customer": {
+        "type": "boolean"
+      },
+      "type": {
+        "enum": [
+          "early_exit",
+          "free_period",
+          "credit",
+          "price_lock",
+          "payment_terms",
+          "free_addon",
+          "none"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "is_commitment",
+      "type",
+      "quote",
+      "promised_by",
+      "to_customer"
+    ],
+    "type": "object"
+  },
+  "system": "You review one sales message (with any thread it quotes) for a commissions controller. A promise is an assurance, by someone selling for the company, of a benefit to the customer: a free exit or cancellation, free months, a credit or discount, a price lock, delayed payment, or a free add-on. Refusals, proposals to look into something, pointers to the contract, normal payment terms and product demos are not promises. A sales rep telling a colleague what they promised a customer is a promise. If it is a promise, copy the exact words that make it from the message (not from a quoted line) as `quote`; otherwise set type to none and quote to an empty string."
+}
