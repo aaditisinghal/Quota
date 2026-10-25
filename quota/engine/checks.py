@@ -3,6 +3,7 @@ returns the decision's output {"fn", "args", "result"}, so replay is `check(rows
 
 import json
 
+from quota import clock as clk
 from quota.engine import ranking
 from quota.engine.calculator import latest_by_id, plan_for
 
@@ -73,7 +74,8 @@ def check_termination(rows, rep_id, end_date) -> dict:
     for line in sorted(rows.get("commission_lines", []), key=lambda l: l["id"]):
         booked = origin[line["decision_id"]]["args"]["booking"]["booking_ts"]
         collected = paid.get(line["deal_id"])
-        ok = booked[:10] <= end_date and collected is not None and collected[:10] <= end_date
+        ok = (clk.local_date(booked) <= end_date and collected is not None
+              and clk.local_date(collected) <= end_date)
         (eligible if ok else held).append(line["id"])
     return {"fn": "check_termination", "args": {"rep_id": rep_id, "end_date": end_date},
             "result": {"eligible": eligible, "held": held}}

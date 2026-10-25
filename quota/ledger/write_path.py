@@ -467,7 +467,7 @@ class WritePath:
             codes.append("INV6_PAYROLL_MISMATCH")
         if queries.satisfied_approval(self.conn, "payroll_file", file_id, self.clock.now()) is None:
             codes.append("INV5_NOT_APPROVED")
-        today = self.clock.now()[:10]
+        today = clk.local_date(self.clock.now())
         if queries.period_locked(self.conn, clk.period_of(today), self.clock.now()):
             codes.append("INV2_PERIOD_LOCKED")
         self._check(actor, "release_payroll", file_id, codes,

@@ -57,7 +57,7 @@ SEED_PRINCIPAL = {"seed": {"kind": "seed", "limit": None, "capabilities": frozen
 
 MATERIALITY_CENTS = 50000          # $500
 MATERIALITY_BPS_OF_PAYOUT = 200    # 2%
-COMPANY_TZ = "UTC"                 # keep UTC everywhere for the hackathon
+COMPANY_TZ = "America/Los_Angeles" # quarters and periods close in company time (R1)
 
 # Approver behavior (Phase 2)
 DIGEST_TIME = "09:00:00Z"          # one daily digest per approver

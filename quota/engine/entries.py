@@ -92,7 +92,7 @@ def clawback_entry(line, total, amortized, date, recoverable: bool, kind="clawba
 
 def is_recoverable(plan: Plan, booking_date: str, churn_date: str, trigger: str) -> bool:
     return (plan.clawback_window_months is not None and plan.signed_at is not None
-            and churn_date <= clk.add_months(booking_date[:10], plan.clawback_window_months)
+            and churn_date <= clk.add_months(clk.local_date(booking_date), plan.clawback_window_months)
             and trigger in plan.clawback_triggers)
 
 
@@ -125,7 +125,7 @@ def clawback_decision(rows, line_id, now) -> dict:
     deal = _find(rows, "deals", line["deal_id"])
     contract = contract_for(rows, deal["id"])
     booking = ranking.resolve_booking(deal, contract, rows.get("esign_events", []), rows.get("precedents", []), now)
-    booking_date = booking.value[:10]
+    booking_date = clk.local_date(booking.value)
     plan = plan_for(rows, line["rep_id"], booking_date)
     churn = next(e for e in rows.get("events", []) if e["type"] == "customer.churned"
                  and json.loads(e["payload_json"])["deal_id"] == deal["id"])
@@ -159,7 +159,7 @@ def void_decision(rows, line_id, now) -> dict:
     before the void month is reversed with the unamortized asset."""
     line = _find(rows, "commission_lines", line_id)
     deal = _find(rows, "deals", line["deal_id"])
-    void_date = deal["known_at"][:10]
+    void_date = clk.local_date(deal["known_at"])
     schedules = [s for s in rows.get("amortization_schedules", []) if s["line_id"] == line_id and s["status"] == "active"]
     if schedules:
         amortized = amortization.amortized_through(json.loads(schedules[0]["schedule_json"]),

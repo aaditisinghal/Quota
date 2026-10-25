@@ -4,6 +4,7 @@ replay run exactly the same code over the same rows."""
 import json
 from dataclasses import asdict, dataclass
 
+from quota import clock as clk
 from quota.engine import ranking
 from quota.engine.plans import Plan, plan_from_row
 from quota.money import apply_bps
@@ -34,7 +35,8 @@ class CommissionResult:
 
 
 def quarter_of(ts: str) -> str:
-    return f"{ts[:4]}Q{(int(ts[5:7]) - 1) // 3 + 1}"
+    day = clk.local_date(ts)                     # company time (R1)
+    return f"{day[:4]}Q{(int(day[5:7]) - 1) // 3 + 1}"
 
 
 def credit_of(booking: Booking) -> int:
