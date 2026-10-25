@@ -1,24 +1,40 @@
 // Formatting and the one rule every screen follows: object ids and dollar figures link into the trace.
+// Everything a person reads is plain English: Pacific times, accounting negatives, things by name. The raw
+// form (ISO time, source ref, the line as the API wrote it) stays one hover or one "Details" click away.
 
 import { Fragment, type ReactNode } from "react";
 
 export const ID = /\b(?:JE|CL|D|A|P|PR|R|M|AS|EV)-\d[\d-]*\b/g;
-const TOKEN = /\b(?:JE|CL|D|A|P|PR|R|M|AS|EV)-\d[\d-]*\b|-?\$\d[\d,]*(?:\.\d{2})?/g;
+const SOURCE_REF = /\b(?:deals|contracts|esign_events|plans|commission_lines|messages|decisions|billing_events|people):[\w.-]+(?::v\d+)?/;
+const TOKEN = new RegExp(
+  [
+    ID.source, // an object id: links into the trace
+    /-?\$\d[\d,]*(?:\.\d{2})?/.source, // a dollar figure: links to the line's object
+    SOURCE_REF.source, // a source record: named, the raw ref in its tooltip
+    /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}Z)?\b/.source, // a time or date: Pacific, ISO in its tooltip
+    /\b[a-z]+(?:_[a-z0-9]+)+\b/.source, // a snake_case word from the engine
+  ].join("|"),
+  "g",
+);
+const WORDS: Record<string, string> = {
+  crm_close_date: "CRM close date",
+  crm_amount_cents: "CRM amount",
+  acv_cents: "ACV",
+  countersigned_at: "countersigned",
+  contract_date: "contract date",
+  booking_date: "booking date",
+};
 
 export function isTraceable(id: string): boolean {
   return new RegExp(`^${ID.source}$`).test(id) || /^(deal|account)\/[\w-]+$/.test(id);
 }
 
+/** Cents as dollars; a negative in parentheses, as an accountant writes it. */
 export function usd(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return "";
-  const sign = cents < 0 ? "-" : "";
   const abs = Math.abs(cents);
-  return `${sign}$${Math.floor(abs / 100).toLocaleString("en-US")}.${String(abs % 100).padStart(2, "0")}`;
-}
-
-export function when(ts: string | null | undefined): string {
-  if (!ts) return "";
-  return ts.replace("T", " ").replace(/:00Z$/, "Z").replace(/Z$/, "");
+  const text = `$${Math.floor(abs / 100).toLocaleString("en-US")}.${String(abs % 100).padStart(2, "0")}`;
+  return cents < 0 ? `(${text})` : text;
 }
 
 // The company keeps Pacific time; the API speaks UTC. Midnight and 23:59:59 UTC are dates resolved from a plain
@@ -88,6 +104,14 @@ export function learnAccounts(nodes: { kind: string; snippet?: unknown }[]) {
   }
 }
 
+/** Seed facts name accounts too: "deals acme v1 Acme Robotics: …", "birch (Birch Health) $100,000.00". */
+export function learnAccountsFromText(text: string) {
+  for (const m of text.matchAll(/\bdeals (\w+) v\d+ ([^:]+):|\b([a-z]\w*) \(([A-Z][^)]*)\) \$/g)) {
+    const [deal, account] = m[1] ? [m[1], m[2]] : [m[3], m[4]];
+    ACCOUNTS[deal] ??= account.trim();
+  }
+}
+
 export function accountName(deal: string): string {
   return ACCOUNTS[deal] ?? deal.charAt(0).toUpperCase() + deal.slice(1);
 }
@@ -126,7 +150,8 @@ export function Money({ cents, trace }: { cents: number | null | undefined; trac
   );
 }
 
-/** Text with every id linked, and every $ figure linked to `trace` (or the first id in the text). */
+/** Text with every id linked, every $ figure linked to `trace` (or the first id in the text), and times,
+ * source refs and engine words in plain English. */
 export function Rich({ text, trace }: { text: string; trace?: string | null }) {
   const first = trace ?? text.match(ID)?.[0] ?? null;
   const parts: ReactNode[] = [];
@@ -135,20 +160,31 @@ export function Rich({ text, trace }: { text: string; trace?: string | null }) {
     const token = match[0];
     const at = match.index ?? 0;
     parts.push(text.slice(last, at));
-    if (token.includes("$")) {
+    last = at + token.length;
+    if (/^-?\$/.test(token)) {
+      const shown = token.startsWith("-") ? `(${token.slice(1)})` : token;
       parts.push(
         first ? (
           <a key={at} className="money" href={traceHref(first)} title={`Trace ${first}`}>
-            {token}
+            {shown}
           </a>
         ) : (
-          <span key={at} className="money plain">{token}</span>
+          <span key={at} className="money plain">{shown}</span>
         ),
       );
-    } else {
+    } else if (new RegExp(`^${ID.source}$`).test(token)) {
       parts.push(<TraceLink key={at} id={token} />);
+    } else if (SOURCE_REF.test(token) && token.includes(":")) {
+      parts.push(
+        <span key={at} className="src" title={token}>
+          {sourceName(token)}
+        </span>,
+      );
+    } else if (/^\d{4}-/.test(token)) {
+      parts.push(<When key={at} ts={token} />);
+    } else {
+      parts.push(WORDS[token] ?? token.replace(/_/g, " "));
     }
-    last = at + token.length;
   }
   parts.push(text.slice(last));
   return (
@@ -156,6 +192,47 @@ export function Rich({ text, trace }: { text: string; trace?: string | null }) {
       {parts.map((part, i) => (
         <Fragment key={i}>{part}</Fragment>
       ))}
+    </>
+  );
+}
+
+const REPLY_LABEL = /^(Claim|Evidence|Rule|Difference|Next step): (.*)$/;
+const RAW = new RegExp(`${SOURCE_REF.source}|\\d{4}-\\d{2}-\\d{2}T|[{}]`);
+
+/** A reply or timeline line: labeled rows (Claim / Evidence / Rule / Difference / Next step) when the analyst
+ * wrote them, and the text as written under "Details" when the plain-English version changed anything. */
+export function Reply({ text, trace }: { text: string; trace?: string | null }) {
+  const lines = text.split("\n");
+  const labeled = lines.filter((l) => REPLY_LABEL.test(l)).length >= 2;
+  return (
+    <>
+      {labeled ? (
+        <dl className="reply">
+          {lines.map((l, i) => {
+            const m = l.match(REPLY_LABEL);
+            return m ? (
+              <div key={i} className="field">
+                <dt>{m[1]}</dt>
+                <dd>
+                  <Rich text={m[2]} trace={trace} />
+                </dd>
+              </div>
+            ) : (
+              <dd key={i} className="reply-line">
+                <Rich text={l} trace={trace} />
+              </dd>
+            );
+          })}
+        </dl>
+      ) : (
+        <Rich text={text} trace={trace} />
+      )}
+      {RAW.test(text) && (
+        <details className="details">
+          <summary>Details</summary>
+          <pre className="raw">{text}</pre>
+        </details>
+      )}
     </>
   );
 }

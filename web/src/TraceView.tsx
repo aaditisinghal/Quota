@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Principal, type Trace, type TraceEdge, type TraceNode } from "./api";
-import { Money, Rich, TraceLink, isTraceable, personName, usd, when } from "./format";
+import { Money, Rich, TraceLink, When, isTraceable, learnAccounts, personName, pt, sourceName, usd } from "./format";
 
 const SECTIONS: [string, string][] = [
   ["line", "Commission lines"],
@@ -38,7 +38,11 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
     setError(null);
     api
       .trace(id, asOf)
-      .then((t) => live && setTrace(t))
+      .then((t) => {
+        if (!live) return;
+        learnAccounts(t.nodes);
+        setTrace(t);
+      })
       .catch((e: Error) => live && (setTrace(null), setError(e.message)));
     return () => {
       live = false;
@@ -72,7 +76,7 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
       <div className="asof">
         <div className="asof-head">
           <span>As of</span>
-          <strong>{asOf ? when(asOf) : "now"}</strong>
+          <strong>{asOf ? <When ts={asOf} /> : "now"}</strong>
           {asOf && (
             <button className="link" onClick={() => setAsOf(null)}>
               back to now
@@ -91,7 +95,7 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
           aria-label="As-of time"
         />
         <div className="asof-scale">
-          <span>{when(stops[0])}</span>
+          <When ts={stops[0]} />
           <span>now</span>
         </div>
       </div>
@@ -100,7 +104,7 @@ export function TraceView({ id, stops, people, onOpen }: Props) {
       {trace && !trace.known && (
         <div className="card unknown">
           <h3>{trace.requested} was not known yet</h3>
-          <p>Nothing about it had reached the ledger by {when(trace.as_of)}. Slide the as-of time later.</p>
+          <p>Nothing about it had reached the ledger by <When ts={trace.as_of} />. Slide the as-of time later.</p>
         </div>
       )}
       {root && <RootCard node={root} trace={trace!} people={people} />}
@@ -218,7 +222,8 @@ function Value({ name, value }: { name: string; value: unknown }) {
 }
 
 function fieldValue(field: string, value: unknown): string {
-  return (field === "base" || field === "amount") && typeof value === "number" ? usd(value) : str(value);
+  if ((field === "base" || field === "amount") && typeof value === "number") return usd(value);
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? pt(value) : str(value);
 }
 
 function RootCard({ node, trace, people }: { node: TraceNode; trace: Trace; people: Principal[] }) {
@@ -240,7 +245,13 @@ function NodeCard({ node, trace, people }: { node: TraceNode; trace: Trace; peop
   return (
     <div className={`card kind-${node.kind} ${pending ? "human" : ""}`}>
       <div className="card-head">
-        {isTraceable(node.id) ? <TraceLink id={node.id} /> : <span className="mono">{node.id}</span>}
+        {isTraceable(node.id) ? (
+          <TraceLink id={node.id} />
+        ) : node.kind === "input" ? (
+          <strong title={node.id}>{sourceName(node.id)}</strong>
+        ) : (
+          <span className="mono">{node.id}</span>
+        )}
         {typeof node.amount_cents === "number" && <Money cents={node.amount_cents} trace={isTraceable(node.id) ? node.id : null} />}
         {pending && <span className="badge accent">waiting on {personName(str(node.approver), people)}</span>}
       </div>
@@ -260,7 +271,7 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
           <Field label="Quarter">{str(n.quarter)}</Field>
           <Field label="Credit">{usd(n.credit_cents as number)}</Field>
           <Field label="Status">{str(n.status)}</Field>
-          <Field label="Known at">{when(str(n.known_at))}</Field>
+          <Field label="Known at"><When ts={str(n.known_at)} /></Field>
         </dl>
       );
     case "je": {
@@ -311,17 +322,17 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
       return (
         <>
           <p className="resolved">
-            <strong>{str(n.field)}</strong> = <span className="mono">{fieldValue(str(n.field), n.value)}</span>
+            <strong>{str(n.field).replace(/_/g, " ")}</strong> = <span className="mono">{fieldValue(str(n.field), n.value)}</span>
           </p>
           <dl>
             <Field label="Rule">{str(n.rule)}</Field>
-            <Field label="Chosen">{`${str(n.basis)} from ${str(n.source)}`}</Field>
+            <Field label="Chosen">{`${str(n.basis).replace(/_/g, " ")} from the ${sourceName(str(n.source))}`}</Field>
           </dl>
           {alternatives.length > 0 && (
             <ul className="alts">
               {alternatives.map((a, i) => (
                 <li key={i}>
-                  outranked: {a.basis} <span className="mono">{fieldValue(str(n.field), a.value)}</span> ({a.source})
+                  outranked: {a.basis.replace(/_/g, " ")} <span className="mono">{fieldValue(str(n.field), a.value)}</span> ({sourceName(a.source)})
                   {a.effect_cents !== null && a.effect_cents !== undefined && <> · would change pay by {usd(a.effect_cents)}</>}
                 </li>
               ))}
@@ -359,10 +370,16 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
             </tbody>
           </table>
           <dl>
-            <Field label="Known at">{when(str(n.known_at))}</Field>
-            <Field label="sha256">{<span className="mono">{str(n.sha256).slice(0, 16)}…</span>}</Field>
+            <Field label="Known at"><When ts={str(n.known_at)} /></Field>
             <Field label="Later">{n.newer_version ? `a newer version exists: ${str(n.newer_version)}` : ""}</Field>
           </dl>
+          <details className="details">
+            <summary>Details</summary>
+            <p className="muted mono">
+              {node.id}
+              {n.source_file ? ` · ${str(n.source_file)} row ${str(n.source_row)}` : ""} · sha256 {str(n.sha256)}
+            </p>
+          </details>
         </>
       );
     }
@@ -386,7 +403,7 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
           <Field label="Requested by">{personName(str(n.requested_by), people)}</Field>
           <Field label="Decision">{n.decision === "pending" ? "pending" : `${str(n.decision)} → ${str(n.result)}`}</Field>
           <Field label="Reason">{str(n.reason)}</Field>
-          <Field label="Decided at">{when(str(n.decided_at))}</Field>
+          <Field label="Decided at"><When ts={str(n.decided_at)} /></Field>
         </dl>
       );
     case "payroll":
@@ -401,7 +418,7 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
       const stripe = /^(in_|pi_|re_)/.test(ref);
       return (
         <dl>
-          <Field label="At">{when(str(n.at))}</Field>
+          <Field label="At"><When ts={str(n.at)} /></Field>
           <Field label={stripe ? "Stripe id" : "External ref"}>{<span className="mono">{ref}</span>}</Field>
         </dl>
       );

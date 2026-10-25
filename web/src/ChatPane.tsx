@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type ChatTurn, type Message, type Pending, type Principal, type Statement } from "./api";
-import { ID, Money, Rich, TraceLink, personName, usd, when } from "./format";
+import { ID, Money, Reply, TraceLink, When, personName, pt, usd } from "./format";
 import { TimelineRow } from "./Timeline";
 
 // Lines from the demo script, one click away; anything else can be typed.
@@ -86,7 +86,7 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
             <strong>{p.name}</strong>
             {!compact && <span>{p.title}</span>}
             {pending.some((a) => a.approver === p.id) && <span className="dot accent" aria-label="has approvals waiting" />}
-            {away[p.id] && <span className="away">away until {when(away[p.id]).slice(0, 10)}</span>}
+            {away[p.id] && <span className="away">away until {pt(away[p.id]).split(",")[0]}</span>}
           </button>
         ))}
       </div>
@@ -105,7 +105,7 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
               <div>
                 <TraceLink id={a.id} /> {a.kind.replace("_", " ")} on <TraceLink id={a.subject}>{a.subject}</TraceLink>{" "}
                 <Money cents={a.amount_cents} trace={a.id} />
-                <div className="muted">since {when(a.since)}</div>
+                <div className="muted">since <When ts={a.since} /></div>
               </div>
               <div className="actions">
                 <button className="primary" disabled={busy} onClick={() => send(`approve ${a.id}`)}>
@@ -127,11 +127,11 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
             <div className="bubble-meta">
               <span>{m.author === principal ? "You" : personName(m.author, people)}</span>
               {m.author !== principal && m.to !== principal && <span>→ {personName(m.to, people)}</span>}
-              <time>{when(m.at)}</time>
+              <When ts={m.at} />
               <TraceLink id={m.id} />
             </div>
             <div className="bubble-text">
-              <Rich text={m.text} trace={m.about ?? m.text.match(ID)?.[0] ?? m.id} />
+              <Reply text={m.text} trace={m.about ?? m.text.match(ID)?.[0] ?? m.id} />
             </div>
           </div>
         ))}
@@ -198,7 +198,7 @@ function StatementPanel({ rep, version }: { rep: string; version: number }) {
   return (
     <details className="statement" open>
       <summary>
-        Your statement <span className="muted">as of {when(statement.as_of)}, quota {usd(statement.quota_cents)} a quarter</span>
+        Your statement <span className="muted">as of <When ts={statement.as_of} />, quota {usd(statement.quota_cents)} a quarter</span>
       </summary>
       <table className="table">
         <thead>

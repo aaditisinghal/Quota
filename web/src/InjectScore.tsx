@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type InjectEvent, type Parsed, type Principal, type Scorecard, type TimelineItem } from "./api";
-import { Money, usd, when } from "./format";
+import { Money, When, usd } from "./format";
 import { TimelineRow } from "./Timeline";
 
 // SPEC "Judge phrases to rehearse", plus moving the clock.
@@ -90,7 +90,7 @@ function Injector({ clock, people, onChange }: { clock: string; people: Principa
   return (
     <div className="panel">
       <h2>
-        Scenario injector <span className="muted">clock {when(clock)}</span>
+        Scenario injector <span className="muted">clock <When ts={clock} /></span>
       </h2>
       <form
         className="composer"
@@ -138,7 +138,7 @@ function Injector({ clock, people, onChange }: { clock: string; people: Principa
           {parsed.events.map((e, i) => (
             <div key={i} className="card event">
               <div className="card-head">
-                <span className="mono">{e.type}</span> <span className="muted">at {when(e.at)}</span>
+                <span className="mono">{e.type}</span> <span className="muted">at <When ts={e.at} /></span>
               </div>
               <p>{e.summary}</p>
               <textarea

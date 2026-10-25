@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Principal, TimelineItem } from "./api";
-import { Rich, personName, when } from "./format";
+import { Reply, When, personName } from "./format";
 
 const FILTERS: Record<string, (item: TimelineItem) => boolean> = {
   All: () => true,
@@ -46,13 +46,13 @@ export function TimelineRow({ item, people, human }: { item: TimelineItem; peopl
   return (
     <li className={`tl kind-${item.kind.toLowerCase()} ${human ? "human" : ""}`}>
       <div className="tl-meta">
-        <time>{when(item.clock)}</time>
+        <When ts={item.clock} />
         <span className="actor">{personName(item.actor, people)}</span>
         <span className="kind">{item.kind}</span>
         {human && <span className="badge accent">needs a person</span>}
       </div>
       <div className="tl-text">
-        <Rich text={item.text} />
+        <Reply text={item.text} />
       </div>
       {item.codes && (
         <div className="codes">

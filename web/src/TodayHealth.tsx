@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Health, type Principal, type Today } from "./api";
-import { Money, Rich, TraceLink, personName, usd, when } from "./format";
+import { Money, Rich, TraceLink, When, personName, pt, usd } from "./format";
 
 // Balances at the previous clock the health screen saw, so a change (an injected churn) shows what moved.
 let seen: { clock: string; balances: Record<string, number> } | null = null;
@@ -51,7 +51,7 @@ function TodayPanel({ today, people }: { today: Today; people: Principal[] }) {
                 {w.items.map((i) => (
                   <li key={i.id}>
                     <TraceLink id={i.id} /> {i.kind.replace("_", " ")} <TraceLink id={i.subject} />{" "}
-                    <Money cents={i.amount_cents} trace={i.id} /> <span className="muted">since {when(i.since)}</span>
+                    <Money cents={i.amount_cents} trace={i.id} /> <span className="muted">since <When ts={i.since} /></span>
                   </li>
                 ))}
               </ul>
@@ -172,7 +172,7 @@ function HealthPanel({ health }: { health: Health }) {
           <h3>Periods</h3>
           <div className="periods">
             {health.periods.map((p) => (
-              <span key={p.period} className={`period ${p.status}`} title={`${p.status} since ${when(p.since)} by ${p.by}`}>
+              <span key={p.period} className={`period ${p.status}`} title={`${p.status} since ${pt(p.since)} by ${p.by}`}>
                 {p.period} {p.status === "locked" ? "🔒" : ""}
               </span>
             ))}
@@ -180,7 +180,7 @@ function HealthPanel({ health }: { health: Health }) {
         </div>
         <div>
           <h3>
-            Trial balance <span className="muted">as of {when(health.clock)}</span>
+            Trial balance <span className="muted">as of <When ts={health.clock} /></span>
           </h3>
           <table className="table">
             <thead>
@@ -188,8 +188,8 @@ function HealthPanel({ health }: { health: Health }) {
                 <th>Account</th>
                 <th className="num">Debit</th>
                 <th className="num">Credit</th>
-                <th className="num" title={before ? `since ${when(baseline!.clock)}` : ""}>
-                  {before ? `Moved since ${baseline!.clock.slice(5, 10)}` : "Moved"}
+                <th className="num" title={before ? `since ${pt(baseline!.clock)}` : ""}>
+                  {before ? `Moved since ${pt(baseline!.clock).split(",")[0]}` : "Moved"}
                 </th>
               </tr>
             </thead>

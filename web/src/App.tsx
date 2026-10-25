@@ -6,7 +6,7 @@ import { InjectScore } from "./InjectScore";
 import { Timeline } from "./Timeline";
 import { TodayHealth } from "./TodayHealth";
 import { TraceView } from "./TraceView";
-import { setWorldYear, usd, when } from "./format";
+import { When, learnAccountsFromText, setWorldYear, usd } from "./format";
 
 type Tab = "case" | "trace" | "chat" | "today" | "inject";
 const TABS: [Tab, string][] = [
@@ -49,6 +49,7 @@ export function App() {
   const refresh = useCallback(async () => {
     try {
       const [world, timeline] = await Promise.all([api.state(), api.timeline(count.current)]);
+      timeline.items.forEach((i) => i.kind === "FACT" && learnAccountsFromText(i.text));
       if (timeline.items.length) {
         count.current = Math.max(count.current, timeline.items[timeline.items.length - 1].seq);
         // Two refreshes can overlap (a poll and an action); keep each line once.
@@ -92,7 +93,7 @@ export function App() {
         </div>
         <div className="clock" title="Simulated clock">
           <span className="muted">Clock</span>
-          <strong>{state ? when(state.clock) : "…"}</strong>
+          <strong>{state ? <When ts={state.clock} /> : "…"}</strong>
         </div>
         {pending.length > 0 && (
           <a className="badge accent big-badge" href="#today">
