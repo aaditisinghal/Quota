@@ -122,6 +122,30 @@ routine approvals come 30 minutes after a request, so April's $500 amortization 
 | --- | --- | --- | --- |
 | ![](docs/screens/1-dispute.png) | ![](docs/screens/2-over-limit.png) | ![](docs/screens/3-churn-ledger-health.png) | ![](docs/screens/4-trace-as-of-april-30.png) |
 
+## Scope: what Quota owns, and when it asks
+
+Quota owns one object, the commission line, from signed contract to paid paycheck to booked expense (SPEC
+"Scope"; the sales pitch is in `docs/PITCH.md`). What each function gets from it, as built:
+
+| Function | Quota produces | Where to see it |
+| --- | --- | --- |
+| Sales Ops | Rep statements and attainment by quarter (a rep sees only their own); dispute answers with evidence; data-quality flags (CRM amount vs contract, backdated close dates, splits not adding to 100%, `NO_RULE` clauses) | Chat (speak as a rep), `/statement/{rep}`, timeline |
+| Revenue Accounting | ASC 340-40 entries (accrual, amortization, write-off, clawback); a commission subledger that ties to the GL (INV3); month-end accrual | Ledger health, Trace |
+| Payroll | One payout file per period with the lines behind it; a same-day final-pay file when a rep leaves; recoveries netted against the next payout | Today, timeline; Payroll types `release PR-...` |
+
+The escalation contract, case by case:
+
+| # | Trigger | As built |
+| --- | --- | --- |
+| 1 | Sources disagree above materiality | The written source ranking settles it; the decision notes it was material |
+| 2 | Authority needed | Exceptions, splits and territory go to the VP within $5,000, then the Controller, then the CFO as backup |
+| 3 | `NO_RULE` | A contract clause or currency no rule covers (a ramp, a non-USD contract): no line, the plan owner is asked |
+| 4 | Legally sensitive | Terminations and unsigned plans go to the Controller; a leave of absence is a `leave_review` for the Controller and HR, and nothing changes |
+| 5 | Integrity signal | Backdating after a lock; an approver who would benefit (credited, or managing someone who is) is skipped for the Controller; repeated exceptions for one rep are flagged |
+| 6 | Locked-period correction | Corrections post in the open period and reach the Controller through the entry approval |
+| 7 | A person must sign | Every seat-drafted entry, payout file and period lock |
+| 8 | Its own checks fail | Before every payroll Quota runs all invariants and the chain; on a failure nothing is paid and the Controller is told |
+
 ## Pressure test against SPEC.md
 
 Every behaviour SPEC.md promises was checked against the running build, through the HTTP API and in a browser.

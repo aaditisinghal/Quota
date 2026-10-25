@@ -14,6 +14,7 @@ const EXAMPLES = [
   "The Controller is on vacation",
   "Approve your own payout",
   "Advance the clock to May 15",
+  "Jordan goes on leave on May 4",
 ];
 
 const ERROR_TYPES: Record<string, string> = {

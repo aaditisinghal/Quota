@@ -137,6 +137,22 @@ export type Case = {
   note?: string;
 };
 
+export type Statement = {
+  rep: string;
+  name: string;
+  as_of: string;
+  quota_cents: number | null;
+  quarters: {
+    quarter: string;
+    credit_cents: number;
+    attainment_bps: number | null;
+    earned_cents: number;
+    paid_cents: number;
+    held_cents: number;
+    lines: { id: string; deal: string; amount_cents: number; status: string; hold: { decision: string; reason: string } | null }[];
+  }[];
+};
+
 export type Scorecard = {
   seed: number;
   reps: number;
@@ -192,6 +208,8 @@ export const api = {
   today: () => call<Today>("/today"),
   messages: (principal: string) => call<Message[]>(`/messages?principal=${encodeURIComponent(principal)}`),
   scorecard: (seed: number) => call<Scorecard>(`/scorecard?seed=${seed}`),
+  statement: (rep: string, viewer: string) =>
+    call<Statement>(`/statement/${encodeURIComponent(rep)}?as_principal=${encodeURIComponent(viewer)}`),
   chat: (as_principal: string, text: string) => call<ChatTurn>("/chat", { as_principal, text }),
   parse: (text: string) => call<Parsed>("/inject/parse", { text }),
   run: (events: InjectEvent[]) => call<{ clock: string; timeline: TimelineItem[] }>("/inject/run", { events }),

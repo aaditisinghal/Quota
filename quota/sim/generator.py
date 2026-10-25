@@ -556,7 +556,7 @@ class Fernhill:
         analyst = CommissionsAnalyst(world, ScriptedExtractor(self.extractions))
         world.seats = [DeferredAccountant(world), analyst]
         world.people = PolicyPeople(world, sorted(self.actions + self.people_actions(), key=lambda a: a["at"]),
-                                    APPROVES)
+                                    APPROVES, releases={"dana.ortiz": "PR-FINAL-"})
         world.queue.add_timer_source(analyst.timers)
         self.seed_facts(world)
         for at, event_type, payload in self.all_events():

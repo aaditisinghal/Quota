@@ -129,5 +129,40 @@ def check_precedent_pattern(rows, field, threshold) -> dict:
     return {"fn": "check_precedent_pattern", "args": {"field": field, "threshold": threshold}, "result": result}
 
 
+KNOWN_CLAUSES = {"billing", "termination_for_convenience", "amendment"}
+
+
+def check_no_rule(rows, deal_id) -> dict:
+    """SPEC escalation contract #3: a contract clause or currency that no plan rule covers (NO_RULE). Ramps,
+    opt-outs, non-USD contracts and anything else unrecognised are not guessed at."""
+    contract = latest_by_id(rows.get("contracts", [])).get(deal_id)
+    clauses = _loads(contract["clauses_json"]) if contract else {}
+    unknown = sorted(k for k in clauses if k not in KNOWN_CLAUSES | {"currency"})
+    currency = str(clauses.get("currency", "USD")).upper()
+    if currency != "USD":
+        unknown.append(f"currency {currency}")
+    return {"fn": "check_no_rule", "args": {"deal_id": deal_id},
+            "result": {"no_rule": bool(unknown), "unknown": unknown}}
+
+
+def check_rep_exceptions(rows, rep_id, threshold) -> dict:
+    """SPEC escalation contract #5: repeated exceptions for one rep are an integrity signal for the Controller."""
+    owners = {d["id"]: d["owner_id"] for d in latest_by_id(rows.get("deals", [])).values()}
+    mine = sorted(p["id"] for p in rows.get("precedents", [])
+                  if owners.get(_loads(p["scope_json"]).get("deal_id")) == rep_id)
+    return {"fn": "check_rep_exceptions", "args": {"rep_id": rep_id, "threshold": threshold},
+            "result": {"flag": len(mine) >= threshold, "precedents": mine}}
+
+
+def check_leave(rows, rep_id, start_date, end_date) -> dict:
+    """SPEC escalation contract #4: a leave of absence is legally sensitive. The check states what is at stake
+    (the rep's unpaid lines); the Controller and HR decide."""
+    lines = sorted((l for l in rows.get("commission_lines", []) if l["rep_id"] == rep_id and l["amount_cents"] > 0),
+                   key=lambda l: l["id"])
+    return {"fn": "check_leave", "args": {"rep_id": rep_id, "start_date": start_date, "end_date": end_date},
+            "result": {"lines": [l["id"] for l in lines], "total_cents": sum(l["amount_cents"] for l in lines)}}
+
+
 CHECKS = {fn.__name__: fn for fn in (check_splits, check_backdating, check_collection, check_termination,
-                                     check_territory, check_plan_drift, check_resubmission, check_precedent_pattern)}
+                                     check_territory, check_plan_drift, check_resubmission, check_precedent_pattern,
+                                     check_no_rule, check_rep_exceptions, check_leave)}

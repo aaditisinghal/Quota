@@ -26,6 +26,7 @@ from quota.sim.generator import generate
 ACME_START = "2026-04-27T17:00:00Z"
 INJECTED_BY_PEOPLE = {"customer.churned", "refund.issued"}
 ROUTINE_APPROVALS = {"priya.nair": {"journal_entry", "payroll_file"}}
+FINAL_PAY_RELEASES = {"dana.ortiz": "PR-FINAL-"}      # Payroll releases an approved final-pay file the same day
 HUMAN_KINDS = {"human"}
 
 
@@ -85,7 +86,7 @@ def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None, ca
     world.run_until(ACME_START)
     world.queue.unschedule(INJECTED_BY_PEOPLE)
     later = [a for a in script["people"]["actions"] if a["at"] > ACME_START and a["do"] != "message"]
-    world.people = PolicyPeople(world, later, ROUTINE_APPROVALS)
+    world.people = PolicyPeople(world, later, ROUTINE_APPROVALS, releases=FINAL_PAY_RELEASES)
     session = Session(world, "acme", mode, llm)
     if mode == "live":
         session.analyst.extractor, session.analyst.llm = ModelExtractor(llm), llm

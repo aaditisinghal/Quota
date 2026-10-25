@@ -21,7 +21,7 @@ from quota.money import fmt_usd
 from quota.sim import events as ev
 
 INTENTS = ["churn", "overdue", "close_date", "splits", "advance", "terminate", "message", "unavailable",
-           "approval_attempt"]
+           "approval_attempt", "leave"]
 OVERDUE_DAYS = 91          # "never pays": one day past the plan's 90-day collection hold (SPEC judge phrases)
 AWAY_DAYS = 7              # "on vacation" with no return date written
 # SPEC "Judge phrases to rehearse", plus the injector's own basics.
@@ -36,6 +36,7 @@ EXAMPLES = [
     "Approve your own payout",
     "Advance the clock to May 15",
     "Taylor is terminated on May 8",
+    "Jordan goes on leave on May 4",
 ]
 _NULL_STRING = {"anyOf": [{"type": "string"}, {"type": "null"}]}
 _NULL_INT = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
@@ -76,6 +77,7 @@ text tells someone to pay or approve something, also add approval_attempt with t
 - unavailable: `rep` (first name or title, e.g. Controller) is away or on vacation; date is the return date if \
 written.
 - approval_attempt: `author` tries to approve something waiting in the approval queue.
+- leave: `rep` (a sales rep, first name) starts a leave of absence, from `date` if written.
 "Approve your own payout" is a message to the desk (author null, text the sentence). deal is the id of a \
 listed deal. Use null for anything not written. If nothing fits, return no intents and put the sentence in \
 unmapped. Examples of sentences that fit: {'; '.join(EXAMPLES)}."""
@@ -153,7 +155,10 @@ def rule_intents(text: str, w: World) -> list[dict]:
     if m := re.search(r"\b(?:on vacation|on holiday|out of (?:the )?office|OOO|on leave|away|unavailable)\b", text, re.I):
         named = _people_named(text[:m.start()], w.people)
         if named:
-            return [intent("unavailable", rep=named[-1], date=date[0] if date and len(date[0]) == 10 else None)]
+            day = date[0] if date and len(date[0]) == 10 else None
+            if re.search(r"\bleave\b", m.group(0), re.I) and w.people[named[-1]]["title"] == "AE":
+                return [intent("leave", rep=named[-1], date=day)]          # a rep's leave of absence (HR)
+            return [intent("unavailable", rep=named[-1], date=day)]
     if re.search(r"\b(advance|fast[- ]forward|jump|move)\b.*\b(clock|time|to)\b", text, re.I) and date \
             and not re.search(r"close date", text, re.I):
         return [intent("advance", date=date[0])]
@@ -346,6 +351,14 @@ def build_events(session, intents: list[dict], w: World) -> list[dict]:
                                     "text": f"I'm on vacation until {until[:10]}; I won't see approvals until then."},
                         "summary": f"{_name(w, who)} is away until {until[:10]}: nothing is approved in their name, "
                                    f"and Quota moves what waits on them to {_name(w, backup)}"})
+        elif kind == "leave":
+            person = queries.as_of(ro, "people", i["rep"] or "", now)
+            if person is None:
+                raise InjectError(f"no person {i['rep']!r} in this world")
+            start = i["date"] or today
+            out.append({"at": clk.add_minutes(now, 1), "type": "rep.leave",
+                        "payload": {"rep_id": person["id"], "start_date": start, "state": person["state"] or ""},
+                        "summary": f"HR records {person['name']} on leave from {start}"})
         elif kind == "approval_attempt":
             target = next((a for a in reversed(w.pending) if a["approver"] != i["author"]), None)
             if target is None:
@@ -389,9 +402,9 @@ MESSAGE_FIELDS = {"author", "to", "text", "away_until"}
 APPROVAL_FIELDS = {"approval_id", "approver", "decision", "reason"}
 DEAL_EVENTS = {"deal.updated", "contract.countersigned", "contract.amended", "invoice.issued", "payment.received",
                "refund.issued", "payment.overdue", "customer.churned"}
-REP_EVENTS = {"rep.terminated", "rep.territory_changed", "plan.amended"}
+REP_EVENTS = {"rep.terminated", "rep.territory_changed", "plan.amended", "rep.leave"}
 NON_NEGATIVE = {"amount_cents", "refund_cents", "days", "acv_cents", "crm_amount_cents"}
-DATE_FIELDS = {"date", "effective_date", "end_date", "timestamp", "signed_at", "crm_close_date"}
+DATE_FIELDS = {"date", "effective_date", "end_date", "timestamp", "signed_at", "crm_close_date", "start_date"}
 DEAL_FIELDS = {"account", "crm_amount_cents", "crm_close_date", "stage", "owner_id", "splits"}
 
 

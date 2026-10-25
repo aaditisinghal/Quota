@@ -5,6 +5,7 @@ import json
 import re
 
 from quota import config
+from quota.engine import calculator
 from quota.ledger import cascade, hashing, invariants, queries
 from quota.timeline import format_line
 
@@ -404,3 +405,45 @@ def today(world) -> dict:
     return {"clock": now, "day": day, "done": done, "posted": posted,
             "waiting": sorted(waiting.values(), key=lambda w: -w["total_cents"]),
             "held": held, "held_total_cents": sum(h["amount_cents"] for h in held)}
+
+
+# ---------- rep statement (Scope: Sales Ops) ----------
+
+def statement(world, rep_id) -> dict:
+    """What a rep is owed and why, by quarter: credit, attainment against the signed plan's quota, and each line
+    with its status and any hold. Recoveries show as negative lines."""
+    ro, now = world.ro, world.clock.now()
+    analyst = next(s for s in world.seats if s.principal == "seat:commissions_analyst")
+    plan = queries.fetch_one(ro, "SELECT config_json FROM plans WHERE rep_id = ? AND signed_at IS NOT NULL "
+                                 "AND known_at <= ? ORDER BY version DESC", (rep_id, now))
+    quota_cents = queries.loads(plan["config_json"])["quota"]["amount"] * 100 if plan else None
+    quarters: dict[str, dict] = {}
+    for line in queries.fetch_all(ro, "SELECT * FROM commission_lines WHERE rep_id = ? AND known_at <= ? ORDER BY id",
+                                  (rep_id, now)):
+        status = queries.line_status(ro, line["id"], now)
+        hold = analyst.hold_on(line) if status in ("draft", "approved") else None
+        q = quarters.setdefault(line["booking_quarter"], {"quarter": line["booking_quarter"], "lines": [],
+                                                          "credit_cents": 0, "earned_cents": 0, "paid_cents": 0,
+                                                          "held_cents": 0})
+        q["lines"].append({"id": line["id"], "deal": line["deal_id"], "amount_cents": line["amount_cents"],
+                           "credit_cents": line["credit_cents"], "status": status,
+                           "hold": {"decision": hold["id"], "reason": hold["explanation"]} if hold else None})
+        if status not in ("superseded",):
+            q["earned_cents"] += line["amount_cents"]
+            if line["amount_cents"] < 0:                     # a recovery takes its credit back out of attainment
+                q["credit_cents"] += line["credit_cents"]
+        if status == "paid":
+            q["paid_cents"] += line["amount_cents"]
+        if hold:
+            q["held_cents"] += line["amount_cents"]
+    # Attainment counts every booking the calculator credits (including history with no lines of its own).
+    rows = queries.commission_rows(ro, rep_id, now)
+    for b in calculator.attainment_bookings(rows, calculator.rep_bookings(rows, rep_id, now)):
+        q = quarters.setdefault(calculator.quarter_of(b.booking_ts), {
+            "quarter": calculator.quarter_of(b.booking_ts), "lines": [], "credit_cents": 0, "earned_cents": 0,
+            "paid_cents": 0, "held_cents": 0})
+        q["credit_cents"] += calculator.credit_of(b)
+    for q in quarters.values():
+        q["attainment_bps"] = q["credit_cents"] * 10000 // quota_cents if quota_cents else None
+    return {"rep": rep_id, "name": config.display_name(rep_id), "as_of": now, "quota_cents": quota_cents,
+            "quarters": [quarters[k] for k in sorted(quarters)]}

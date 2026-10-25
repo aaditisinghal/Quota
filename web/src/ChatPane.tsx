@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type ChatTurn, type Message, type Pending, type Principal } from "./api";
-import { ID, Money, Rich, TraceLink, personName, when } from "./format";
+import { api, type ChatTurn, type Message, type Pending, type Principal, type Statement } from "./api";
+import { ID, Money, Rich, TraceLink, personName, usd, when } from "./format";
 import { TimelineRow } from "./Timeline";
 
 // Lines from the demo script, one click away; anything else can be typed.
@@ -15,7 +15,7 @@ const SUGGESTIONS: Record<string, string[]> = {
   "marcus.lee": ["Honor Mar 31 for Acme. Count it in Q1.", "Sounds good, let's discuss."],
   "priya.nair": ["I'm on vacation until May 25."],
   "grace.liu": ["Pay Taylor anyway."],
-  "dana.ortiz": [],
+  "dana.ortiz": ["release PR-2026-05"],
   "morgan.diaz": ["Jordan gets a $2,000 SPIF for closing Acme."],
   "alex.chen": ["Approve my Orbit commission now."],
   "taylor.brooks": ["Release my Vale commission today."],
@@ -68,6 +68,7 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
   }
 
   const events = (turn?.timeline ?? []).filter((i) => i.kind !== "MESSAGE" && i.kind !== "REPLY");
+  const isRep = me?.capabilities.includes("dispute:own_lines") ?? false;
 
   return (
     <section className="chat">
@@ -136,6 +137,8 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
         <div ref={bottom} />
       </div>
 
+      {isRep && <StatementPanel rep={principal} version={version} />}
+
       {events.length > 0 && (
         <div className="turn-events">
           <h3>What Quota did</h3>
@@ -181,5 +184,53 @@ export function ChatPane({ principal, setPrincipal, people, pending, away, versi
         </div>
       )}
     </section>
+  );
+}
+
+/** A rep's own statement (SPEC Scope, Sales Ops): what they are owed and why, by quarter. Reps see only theirs. */
+function StatementPanel({ rep, version }: { rep: string; version: number }) {
+  const [statement, setStatement] = useState<Statement | null>(null);
+  useEffect(() => {
+    api.statement(rep, rep).then(setStatement).catch(() => setStatement(null));
+  }, [rep, version]);
+  if (!statement || statement.quarters.length === 0) return null;
+  return (
+    <details className="statement" open>
+      <summary>
+        Your statement <span className="muted">as of {when(statement.as_of)}, quota {usd(statement.quota_cents)} a quarter</span>
+      </summary>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Quarter</th>
+            <th className="num">Attainment</th>
+            <th>Lines</th>
+            <th className="num">Earned</th>
+            <th className="num">Paid</th>
+            <th className="num">Held</th>
+          </tr>
+        </thead>
+        <tbody>
+          {statement.quarters.map((q) => (
+            <tr key={q.quarter}>
+              <td className="mono">{q.quarter}</td>
+              <td className="num">{q.attainment_bps === null ? "" : `${(q.attainment_bps / 100).toFixed(2)}%`}</td>
+              <td>
+                {q.lines.map((l) => (
+                  <div key={l.id}>
+                    <TraceLink id={l.id} /> {l.deal} <Money cents={l.amount_cents} trace={l.id} />{" "}
+                    <span className="tag">{l.status}</span>
+                    {l.hold && <span className="muted"> held: {l.hold.reason}</span>}
+                  </div>
+                ))}
+              </td>
+              <td className="num">{usd(q.earned_cents)}</td>
+              <td className="num">{usd(q.paid_cents)}</td>
+              <td className="num">{q.held_cents ? usd(q.held_cents) : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
   );
 }

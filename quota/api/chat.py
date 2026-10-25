@@ -19,6 +19,7 @@ from quota.ledger import queries
 
 ANALYST = "seat:commissions_analyst"
 MAX_TEXT = 4000
+RELEASE = re.compile(r"^\s*release\s+(PR-[\w.-]+)\s*$", re.I)
 COMMAND = re.compile(r"^\s*(approve|reject)\s+(A-\d{4})\b[\s:,.\-]*(.*)$", re.I | re.S)
 
 _MONTH = "|".join(sorted({m for full in MONTHS for m in (full, full[:3], "sept")}, key=len, reverse=True))
@@ -135,7 +136,12 @@ def chat(session, as_principal: str, text: str, to: str | None = None) -> dict:
     started = world.clock.now()
     command = COMMAND.match(text)
     message_id = None
-    if command and queries.as_of(world.ro, "approvals", command.group(2).upper(), None) is not None:
+    release = RELEASE.match(text)
+    if release and queries.as_of(world.ro, "payroll_files", release.group(1).upper(), None) is not None:
+        file_id = release.group(1).upper()
+        world.api.release_payroll(as_principal, file_id)     # the write path decides who may release
+        action = {"kind": "release", "file_id": file_id}
+    elif command and queries.as_of(world.ro, "approvals", command.group(2).upper(), None) is not None:
         verb, approval_id = command.group(1).lower(), command.group(2).upper()
         reason = command.group(3).strip() or f"{verb.capitalize()}d in chat."
         getattr(world.api, verb)(as_principal, approval_id, reason)

@@ -91,6 +91,19 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
         with session.lock:
             return session.messages(principal)
 
+    @app.get("/statement/{rep_id}")
+    def get_statement(rep_id: str, as_principal: str | None = None):
+        """A rep sees only their own statement (SPEC: reps cannot see other reps' pay); people in finance and
+        Sales Ops can see anyone's."""
+        with session.lock:
+            people = {p["id"]: p for p in session.principals()}
+            if rep_id not in people:
+                raise HTTPException(404, f"no person {rep_id}")
+            viewer = people.get(as_principal or "")
+            if viewer is not None and "dispute:own_lines" in viewer["capabilities"] and as_principal != rep_id:
+                raise HTTPException(403, "a rep can see only their own statement")
+            return views.statement(session.world, rep_id)
+
     @app.get("/scorecard")
     def get_scorecard(seed: int = 7):
         return scorecard(seed, runs)

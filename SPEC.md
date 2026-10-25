@@ -16,6 +16,47 @@ Build Quota (working name): the commissions desk of a 60-rep B2B SaaS company, r
 
 **Assumptions.** Hacking started Friday 6 pm. If it runs 36 hours, submission is Sunday around 6 am, which leaves about 26 working hours from 2 am Saturday. Confirm the real deadline and adjust the build plan.
 
+## Scope
+
+Quota owns one object: **the commission line**, from signed contract to paid paycheck to booked expense. It reads from Sales Ops and Revenue Accounting, hands finished drafts to Payroll and the general ledger, and never edits another team's system.
+
+**Pitch line:** Quota owns every commission from contract to paycheck to ledger. It reads Sales and Revenue data, hands Payroll and the GL finished drafts, and asks a human only when policy says it must.
+
+### What it contributes to each function
+
+|  | Sales Ops | Revenue Accounting | Payroll |
+| --- | --- | --- | --- |
+| **Reads** | CRM deals and field history, signed comp plans, quotas, territories | Contracts, invoices, payments, refunds, churn, contract changes | Employee records: start and end dates, state, status |
+| **Produces** | Rep statements; attainment by quarter; dispute answers with evidence; data-quality flags (wrong amount, backdated close date, splits not adding to 100%) | Draft entries to capitalize, amortize and write off commission cost (ASC 340-40); a commission subledger that reconciles to the GL; month-end accrual for unapproved commissions | One approved payout file per period with gross amount per rep and the line items behind it; same-day payout requests for terminated reps; recovery of overpaid commissions from future commission advances |
+| **Never does** | Design plans, set quotas, assign territories, edit the CRM | Book revenue, decide revenue recognition, close the books | Withhold taxes, run payroll, change base pay, release money |
+| **What it saves** | Dispute handling and statement questions | Commission schedules and month-end reconciliation | Last-minute corrections and final-pay penalties |
+
+The three connect through Quota. A churn arrives from Revenue Accounting; Quota sends a recovery draft to Payroll, a write-off entry to the GL, and an attainment correction to Sales Ops. Quota is the only place all three effects are calculated together and kept in agreement.
+
+### The escalation contract
+
+Quota escalates in exactly these eight cases and does everything else without asking. Each escalation names the trigger, the dollar impact and the evidence. Every answer is saved as a policy with its scope, so the same question isn't asked twice.
+
+| # | Trigger | Goes to |
+| --- | --- | --- |
+| 1 | Sources disagree above $500 or 2% of the payout, and no saved policy covers it | Plan owner (VP Sales Ops) |
+| 2 | Someone's authority is needed: an exception, a split, a reading of the plan | Approver within their dollar limit, then the next one up |
+| 3 | Unknown situation: a clause, field or currency that matches no rule (`NO_RULE`) | Plan owner |
+| 4 | Legally sensitive: termination, recovering money in California, leave of absence, unsigned plan | Controller (and HR for leave) |
+| 5 | Integrity signal: post-lock backdating, the approver benefits from the decision, repeated exceptions for one rep | Controller |
+| 6 | Correction to a locked period above materiality | Controller |
+| 7 | Any entry, payout file or period lock that policy requires a person to sign | Controller (Payroll releases payment) |
+| 8 | Its own checks fail: ledger out of balance, replay mismatch, extraction can't be verified | Controller; the affected lines are held |
+
+### Deliberately out of scope
+
+- **Plan design:** Sales Ops strategy.
+- **Revenue recognition:** owned by the revenue system; Quota only consumes its events.
+- **Running payroll and tax withholding:** the payroll provider.
+- **Forecasting commission spend:** FP\&A; Quota can export actuals to it.
+
+This boundary is the answer to "isn't this CaptivateIQ?" Those tools calculate payouts for a comp admin. Quota does the work between the calculation and the books, and stops at clearly defined handoffs.
+
 ## What the judges look for
 
 Every feature below exists to answer one of the four judging questions or one of the brief's five hard parts. If a feature doesn't map to a row here, cut it.

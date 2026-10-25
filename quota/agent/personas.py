@@ -179,10 +179,29 @@ class PolicyPeople(ScriptedPeople):
     """Rule-played people for generated worlds: the script's actions at their times, and approvers who approve
     what is addressed to them `delay_minutes` after it arrives. The eval measures Quota, not the approvers."""
 
-    def __init__(self, world, actions: list[dict], approves: dict[str, set[str]], delay_minutes=30):
+    def __init__(self, world, actions: list[dict], approves: dict[str, set[str]], delay_minutes=30,
+                 releases: dict[str, str] | None = None):
         super().__init__(world, {"actions": actions})
         self.approves, self.delay_minutes = approves, delay_minutes
+        self.releases = releases or {}      # principal -> payroll file id prefix they release once approved
         self.away: dict[str, str] = {}      # principal -> back at (an approver on vacation answers nothing)
+        self.released: set[str] = set()
+
+    def _due_releases(self):
+        """Approved, unreleased payroll files with a prefix someone releases on their own (final pay)."""
+        ro, now = self.world.ro, self.world.clock.now()
+        out = []
+        for who, prefix in self.releases.items():
+            for payroll in queries.fetch_all(ro, "SELECT * FROM payroll_files WHERE id LIKE ? AND known_at <= ?",
+                                             (f"{prefix}%", now)):
+                if payroll["id"] in self.released or queries.latest_status(
+                        ro, "payroll_status", "file_id", payroll["id"], now) == "released":
+                    continue
+                root = queries.satisfied_approval(ro, "payroll_file", payroll["id"], now)
+                if root and self.away.get(who, "") <= now:
+                    decided = queries.approval_decision(ro, root, now)
+                    out.append((clk.add_minutes(decided["known_at"], self.delay_minutes), who, payroll["id"]))
+        return out
 
     def _due_approvals(self):
         now = self.world.clock.now()
@@ -197,11 +216,17 @@ class PolicyPeople(ScriptedPeople):
             if at <= now:
                 self.api.approve(approval["approver"], approval["id"], "Reviewed; consistent with the plan.")
                 acted = True
+        for at, who, file_id in self._due_releases():
+            if at <= now:
+                self.released.add(file_id)
+                self.api.release_payroll(who, file_id)
+                acted = True
         return acted
 
     def next_time(self) -> str | None:
         now = self.world.clock.now()
-        times = [t for t in [super().next_time()] + [at for at, _ in self._due_approvals()] if t and t > now]
+        times = [t for t in [super().next_time()] + [at for at, _ in self._due_approvals()]
+                 + [at for at, _, _ in self._due_releases()] if t and t > now]
         return min(times) if times else None
 
 

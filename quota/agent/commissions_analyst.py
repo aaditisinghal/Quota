@@ -53,7 +53,7 @@ def calc_text(calc) -> str:
 
 
 FACT_ROUTES = {"deal.updated": "deal_updated", "payment.overdue": "overdue", "rep.terminated": "terminated",
-               "rep.territory_changed": "territory", "plan.amended": "plan_amended"}
+               "rep.territory_changed": "territory", "plan.amended": "plan_amended", "rep.leave": "leave"}
 
 
 class CommissionsAnalyst(Seat):
@@ -166,6 +166,7 @@ class CommissionsAnalyst(Seat):
         ctx.data["split_holds"] = {d["subject_id"] for d in self.decisions(kind="splits_check")}
         ctx.data["territory_holds"] = {d["subject_id"]: json.loads(d["output_json"])["args"]["target_rep"]
                                        for d in self.decisions(kind="territory_check")}
+        ctx.data["no_rule_holds"] = {d["subject_id"] for d in self.decisions(kind="no_rule_check")}
 
     def reconcile_commission_run(self, ctx):
         """Bookings (deals, and amendments that raised ACV) in the run's window with no commission yet. A deal
@@ -173,13 +174,18 @@ class CommissionsAnalyst(Seat):
         territory move waits until its CRM owner is the move's target."""
         period = ctx.event.payload["period"]
         since = ctx.event.payload.get("since") or period
-        todo, bad_splits = [], {}
+        todo, bad_splits, no_rule = [], {}, {}
         for rep, rows in ctx.data["rows"].items():
             deals = calculator.latest_by_id(rows["deals"])
             for key, booking in calculator.rep_bookings(rows, rep, self.now).items():
                 if f"{key}/{rep}" in ctx.data["lined"] or not since <= clk.period_of(booking.booking_ts) <= period:
                     continue
                 deal = deals[key.split("+")[0]]
+                unknown = checks.check_no_rule(rows, deal["id"])
+                if unknown["result"]["no_rule"]:
+                    if deal["id"] not in ctx.data["no_rule_holds"]:
+                        no_rule[deal["id"]] = (deal, rows, unknown)
+                    continue
                 if ranking.splits_total(ranking.resolve_splits(deal, [])) != 10000:
                     if deal["id"] not in ctx.data["split_holds"]:
                         bad_splits[deal["id"]] = deal
@@ -188,7 +194,7 @@ class CommissionsAnalyst(Seat):
                 if target is not None and deal["owner_id"] != target:
                     continue
                 todo.append((rep, key))
-        ctx.data["bad_splits"] = bad_splits
+        ctx.data["bad_splits"], ctx.data["no_rule"] = bad_splits, no_rule
         return todo
 
     def calculate_commission_run(self, ctx):
@@ -208,6 +214,17 @@ class CommissionsAnalyst(Seat):
                 f"{owner} confirms the split",
                 [(owner, f"{deal['account']} ({deal_id}) credits {shares}, which is "
                          f"{output['result']['total_bps'] / 100:g}%. Both lines are held. What is the approved split?")]))
+        for deal_id, (deal, rows, output) in sorted(ctx.data["no_rule"].items()):
+            unknown = ", ".join(output["result"]["unknown"])
+            decision_ids.append(self.flag(
+                "no_rule_check", deal_id, {"deals": [deal], "contracts": [c for c in rows["contracts"]
+                                                                          if c["deal_id"] == deal_id]},
+                output, "held", f"NO_RULE: {deal_id}'s contract has {unknown}, which no plan rule covers; no line "
+                                f"until {routing.owner('plan_config')} says how to treat it",
+                [(routing.owner("plan_config"), f"NO_RULE on {deal['account']} ({deal_id}): the signed contract has "
+                                                f"{unknown}, and the plan has no rule for it. I have not guessed: no "
+                                                f"commission line until you tell me how it should count. How should "
+                                                f"it count?")]))
         for rep, key, calc in ctx.calc:
             decision_ids.append(self.record_calc(ctx.data["rows"][rep], key.split("+")[0], rep, calc, key=key)[0])
         return decision_ids
@@ -415,10 +432,24 @@ class CommissionsAnalyst(Seat):
         return {"current": current, "granted": granted, "delta": granted.amount_cents - current.amount_cents}
 
     def decide_exception(self, ctx):
-        return {"approver": routing.owner("plan_exception")}
+        """The plan owner approves, unless they would benefit (they are credited on the deal, or manage someone
+        who is): then it goes straight to the Controller, flagged (escalation contract #5)."""
+        owner = routing.owner("plan_exception")
+        deal = self.get("deals", ctx.res["deal_id"])
+        credited = {s["rep"] for s in json.loads(deal["splits_json"])}
+        managers = {(self.get("people", r) or {}).get("manager_id") for r in credited}
+        if owner in credited | managers:
+            return {"approver": routing.owner("material_flag"), "conflict": owner}
+        return {"approver": owner}
 
     def write_exception(self, ctx):
         message, r, c, approver = ctx.data["message"], ctx.res, ctx.calc, ctx.decision["approver"]
+        if ctx.decision.get("conflict"):
+            who = ctx.decision["conflict"]
+            self.send(approver, f"Integrity flag: {config.display_name(who)} would normally approve the exception in "
+                                f"{message['id']} ({r['deal_id']} {r['field']} = {r['value']}, "
+                                f"{fmt_usd(abs(c['delta']))}) but benefits from it (credited on the deal or managing "
+                                f"a rep who is), so it comes to you instead.")
         try:
             approval_id = self.wp.request_approval(self.principal, "plan_exception", message["id"], abs(c["delta"]),
                                                    approver=approver)
@@ -670,7 +701,28 @@ class CommissionsAnalyst(Seat):
         calc = calculator.commission_decision(rows, deal["id"], rep, self.now)
         line = ctx.data["line"]
         decision_ids = [self.record_calc(rows, deal["id"], rep, calc, line["id"] if line else None)[0]]
-        return decision_ids + self.propose_plan_change(claim.field)
+        return decision_ids + self.propose_plan_change(claim.field) + self.flag_repeated_exceptions(rep)
+
+    def flag_repeated_exceptions(self, rep) -> list[str]:
+        """Escalation contract #5: the same rep receiving repeated exceptions goes to the Controller, once per
+        new exception past the threshold."""
+        precedents = queries.fetch_all(self.ro, "SELECT * FROM precedents WHERE known_at <= ? ORDER BY id", (self.now,))
+        deals = [d for d in queries.latest_rows(self.ro, "deals", self.now)
+                 if any(queries.loads(p["scope_json"]).get("deal_id") == d["id"] for p in precedents)]
+        rows = {"precedents": [p for p in precedents if queries.loads(p["scope_json"]).get("deal_id")], "deals": deals}
+        output = checks.check_rep_exceptions(rows, rep, config.PROPOSE_PLAN_CHANGE_AFTER)
+        found = output["result"]["precedents"]
+        seen = [set(json.loads(d["output_json"])["result"]["precedents"])
+                for d in self.decisions(kind="integrity_check", subject_id=rep)]
+        if not output["result"]["flag"] or any(set(found) <= before for before in seen):
+            return []
+        controller = routing.owner("material_flag")
+        text = (f"integrity signal: {len(found)} exceptions granted for {rep} ({', '.join(found)}); for "
+                f"{controller} to review")
+        return [self.flag("integrity_check", rep, rows, output, "escalated", text,
+                          [(controller, f"Integrity flag: {config.display_name(rep)} has had {len(found)} plan "
+                                        f"exceptions granted ({', '.join(found)}). Each was approved within "
+                                        f"authority; repeated exceptions for one rep are yours to review.")])]
 
     def propose_plan_change(self, field) -> list[str]:
         """The same kind of exception approved on several deals becomes a proposed plan change for Sales Ops to
@@ -713,9 +765,13 @@ class CommissionsAnalyst(Seat):
         return held
 
     def reconcile_payroll_file(self, ctx):
-        """Approved positive lines on collected deals (the plan pays on collection). Recoveries (negative lines)
-        stay in 1290 rather than netting through payroll."""
-        held = self.payroll_held()
+        """Approved positive lines on collected deals (the plan pays on collection), plus recoveries netted
+        against them. First, escalation contract #8: if the ledger fails its own checks, nothing is paid."""
+        failures = self.self_check()
+        if failures:
+            ctx.route, ctx.data["failures"] = "self_check_failed", failures
+            return []
+        held = self.payroll_held() | self.in_open_payroll()
         payable = [l for l in self.lines() if l["amount_cents"] > 0 and l["id"] not in held
                    and self.line_status(l["id"]) == "approved" and queries.collected(self.ro, l["deal_id"], self.now)]
         # SPEC worked example: a rep's approved recovery (a clawback in 1290) is netted against their new
@@ -733,6 +789,25 @@ class CommissionsAnalyst(Seat):
                     left.append(recovery)
         ctx.data["left_in_1290"] = left if payable else []
         return [l["id"] for l in payable + netted]
+
+    def self_check(self) -> list[str]:
+        """Every invariant (INV1 to INV7) and the hash chain (INV8), before any money is paid."""
+        from quota.ledger import hashing, invariants
+        failures = [f"{name}: {v.subject} {v.detail}" for name, found in invariants.check_all(self.ro).items()
+                    for v in found]
+        ok, bad_seq = hashing.verify_chain(self.ro)
+        if not ok:
+            failures.append(f"INV8: hash chain breaks at seq {bad_seq}")
+        return failures
+
+    def write_self_check_failed(self, ctx):
+        failures = ctx.data["failures"]
+        period = ctx.event.payload["period"]
+        self.emit("HOLD", f"payroll {period} not created: the ledger failed its own checks ({len(failures)}): "
+                          + "; ".join(failures[:5]))
+        self.send(routing.owner("material_flag"), f"Payroll {period} is held: my own checks failed, so nothing is "
+                                                  f"paid until this is fixed: " + "; ".join(failures[:10]) + ".")
+        return []
 
     def write_payroll_file(self, ctx):
         if not ctx.res:
@@ -940,9 +1015,70 @@ class CommissionsAnalyst(Seat):
         text = (f"{name} left {p['end_date']} ({p['state']}): the signed plan pays lines booked and collected before "
                 f"then ({', '.join(result['eligible']) or 'none'}); held: {', '.join(result['held']) or 'none'}; no "
                 f"clawback without a signed clause")
-        return [self.flag("termination_review", p["rep_id"], ctx.rows, ctx.calc,
-                          "held" if result["held"] else "posted", text,
-                          [(routing.owner("material_flag"), f"Policy flag: {text}.")])]
+        decision_ids = [self.flag("termination_review", p["rep_id"], ctx.rows, ctx.calc,
+                                  "held" if result["held"] else "posted", text,
+                                  [(routing.owner("material_flag"), f"Policy flag: {text}.")])]
+        self.final_pay(p["rep_id"], p["end_date"], result["eligible"])
+        return decision_ids
+
+    def in_open_payroll(self) -> set[str]:
+        """Lines in a final-pay file that Payroll has not released yet, so the regular cycle does not pay them
+        twice. A regular file whose release was refused (E16) does not count: its lines carry to the next one."""
+        out = set()
+        for payroll in queries.fetch_all(self.ro, "SELECT * FROM payroll_files WHERE id LIKE 'PR-FINAL-%' "
+                                                  "AND known_at <= ?", (self.now,)):
+            if queries.latest_status(self.ro, "payroll_status", "file_id", payroll["id"], self.now) != "released":
+                out |= {pl["line_id"] for pl in json.loads(payroll["lines_json"])}
+        return out
+
+    def final_pay(self, rep, end_date, eligible) -> None:
+        """Scope, Payroll: a same-day payout request for a departing rep's earned, approved commission, so final
+        pay is on time. What is earned but not yet approved follows in the regular cycle once approved."""
+        ready = [l for l in eligible if self.line_status(l) == "approved" and l not in self.in_open_payroll()]
+        waiting = [l for l in eligible if self.line_status(l) == "draft"]
+        if not ready:
+            if waiting:
+                self.send(routing.owner("payroll_release"),
+                          f"Final pay for {config.display_name(rep)} (left {end_date}): {', '.join(waiting)} earned "
+                          f"but not yet approved; they follow once the Controller approves them.")
+            return
+        file_id = self.wp.create_payroll_file(self.principal, f"FINAL-{rep}-{end_date}", ready)
+        total = self.get("payroll_files", file_id)["total_cents"]
+        self.emit("PAYROLL", f"{file_id} created: final pay {fmt_usd(total)} ({', '.join(ready)})")
+        approver = routing.owner("payroll_file")
+        approval_id = self.wp.request_approval(self.principal, "payroll_file", file_id, total, approver=approver)
+        self.emit("APPROVAL", f"{approval_id} payroll_file {file_id} {fmt_usd(total)} -> {approver}")
+        self.send(approver, f"{approval_id} is final pay for {config.display_name(rep)}, who left {end_date}: "
+                            f"{fmt_usd(total)} ({', '.join(ready)}). Final wages are due promptly; please decide it "
+                            f"today.")
+        self.send(routing.owner("payroll_release"), f"Final pay file {file_id} ({fmt_usd(total)}) for "
+                                                    f"{config.display_name(rep)} is waiting on {approval_id}; release it "
+                                                    f"once approved."
+                  + (f" Also earned but not yet approved: {', '.join(waiting)}." if waiting else ""))
+
+    # ---------- rep.leave (escalation contract #4) ----------
+
+    def gather_leave(self, ctx):
+        rep_id = ctx.event.payload["rep_id"]
+        ctx.rows = {"people": [self.get("people", rep_id)],
+                    "commission_lines": [l for l in self.lines(rep_id=rep_id) if l["amount_cents"] > 0
+                                         and self.line_status(l["id"]) in ("draft", "approved")]}
+
+    def write_leave(self, ctx):
+        p = ctx.event.payload
+        output = checks.check_leave(ctx.rows, p["rep_id"], p["start_date"], p.get("end_date"))
+        lines, total = output["result"]["lines"], output["result"]["total_cents"]
+        name = config.display_name(p["rep_id"])
+        span = f"from {p['start_date']}" + (f" to {p['end_date']}" if p.get("end_date") else "")
+        text = (f"{name} on leave {span} ({p['state'] or 'state unknown'}): {len(lines)} unpaid line(s), "
+                f"{fmt_usd(total)}; whether commission is paid during leave is a legal and policy question, so "
+                f"nothing is changed until the Controller and HR say")
+        decision_id = self.wp.record_decision(self.principal, "leave_review", p["rep_id"],
+                                              queries.input_refs(ctx.rows), {}, [], output, "escalated", text)
+        self.emit("DECISION", f"{decision_id} leave_review {p['rep_id']}: {text}")
+        self.send(routing.owner("material_flag"), f"Leave of absence ({decision_id}): {text}. Please confirm with HR "
+                                                  f"how {name}'s commission should be handled.")
+        return [decision_id]
 
     # ---------- rep.territory_changed: a half-done move (E10) ----------
 
@@ -985,4 +1121,5 @@ class CommissionsAnalyst(Seat):
         text = (f"plan v{result['draft_version']} for {p['rep_id']} is an unsigned draft that differs from signed "
                 f"v{result['signed_version']} ({', '.join(result['changed'])}); paying on the signed plan")
         return [self.flag("plan_drift", p["rep_id"], ctx.rows, ctx.calc, "escalated", text,
-                          [(owner, f"Config drift: {text}. A change needs a signed amendment.")])]
+                          [(owner, f"Config drift: {text}. A change needs a signed amendment."),
+                           (routing.owner("material_flag"), f"Unsigned plan (legally sensitive): {text}.")])]

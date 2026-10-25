@@ -40,6 +40,8 @@ EVENT_SCHEMAS = {
     "customer.churned": _schema({"deal_id": STRING, "effective_date": STRING, "reason": STRING,
                                  "refund_cents": INTEGER}),
     "rep.terminated": _schema({"rep_id": STRING, "end_date": STRING, "state": STRING}),
+    # Scope, escalation contract #4: a leave of absence is legally sensitive; Quota asks, it does not decide.
+    "rep.leave": _schema({"rep_id": STRING, "start_date": STRING, "state": STRING}, {"end_date": STRING}),
     "rep.territory_changed": _schema({"rep_id": STRING, "accounts": STRINGS, "effective_date": STRING,
                                       "actor": STRING}),
     "plan.amended": _schema({"rep_id": STRING, "version": INTEGER, "changes": OBJECT, "signed_at": STRING}),
