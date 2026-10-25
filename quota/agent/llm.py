@@ -1,7 +1,8 @@
 """Every model call goes through here.
 
 Calls are cached on disk by sha256(model + prompt + schema), so a rerun is free and deterministic.
-Model id from QUOTA_MODEL (default claude-opus-5-5); credentials from ANTHROPIC_API_KEY or any other
+Model id from QUOTA_MODEL (default claude-opus-5-5); chat answers use LLM.for_chat(), on claude-sonnet-5 unless
+QUOTA_CHAT_MODEL names another. Credentials from ANTHROPIC_API_KEY or any other
 source the Anthropic SDK resolves. Models only read and write words: every output is schema-checked here,
 and callers verify content (quotes, numbers) before anything acts on it.
 """
@@ -18,6 +19,10 @@ from quota.money import fmt_usd
 DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / ".llm_cache"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"   # re-run policy declines on Anthropic's recommended fallback
+# Only these models accept the server-side fallback; any other model (claude-sonnet-5, the chat model) is called
+# on the plain Messages API.
+FALLBACK_MODELS = frozenset({"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"})
+CHAT_MODEL = "claude-sonnet-5"      # chat answers (quota.agent.answer); QUOTA_CHAT_MODEL overrides
 MAX_TOKENS = 16000
 
 EXTRACT_SYSTEM = ("You turn one piece of text into structured data that matches the given JSON schema. "
@@ -82,16 +87,14 @@ def anthropic_transport(client=None):
         import anthropic
         if client is None:
             client = anthropic.Anthropic()
+        request = {"model": model, "max_tokens": MAX_TOKENS, "system": system,
+                   "messages": [{"role": "user", "content": prompt}],
+                   "output_config": {"effort": effort, "format": {"type": "json_schema", "schema": schema}}}
         try:
-            response = client.beta.messages.create(
-                model=model,
-                max_tokens=MAX_TOKENS,
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
-                system=system,
-                messages=[{"role": "user", "content": prompt}],
-                output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
-            )
+            if model in FALLBACK_MODELS:
+                response = client.beta.messages.create(**request, betas=[FALLBACK_BETA], fallbacks="default")
+            else:
+                response = client.messages.create(**request)
         except TypeError as exc:   # the SDK raises this when no credential source resolves
             if "authentication" not in str(exc):
                 raise
@@ -143,6 +146,16 @@ class LLM:
         path.write_text(json.dumps({"model": self.model, "system": system, "prompt": prompt, "schema": schema,
                                     "output": output}, indent=2, sort_keys=True), encoding="utf-8")
         return output
+
+    def for_chat(self) -> "LLM":
+        """The same cache and transport on the chat model (claude-sonnet-5 unless QUOTA_CHAT_MODEL says otherwise).
+        Built once per instance; extraction and personas keep this instance's model."""
+        model = os.environ.get("QUOTA_CHAT_MODEL") or CHAT_MODEL
+        chat = getattr(self, "_chat", None)
+        if chat is None or chat.model != model:
+            chat = self if model == self.model else LLM(model=model, cache_dir=self.cache_dir, transport=self.transport)
+            self._chat = chat
+        return chat
 
     def extract(self, schema: dict, text: str, instructions: str = EXTRACT_SYSTEM) -> dict:
         return self.complete_json(instructions, text, schema, effort="low")
