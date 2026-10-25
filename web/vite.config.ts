@@ -4,7 +4,10 @@ import react from "@vitejs/plugin-react";
 // In dev, the API runs separately (`python -m quota serve`); `npm run build` writes into the Python package,
 // where FastAPI serves it at /.
 const api = "http://127.0.0.1:8000";
-const paths = ["/state", "/timeline", "/trace", "/ledger", "/today", "/scorecard", "/messages", "/chat", "/inject"];
+const paths = [
+  "/state", "/timeline", "/trace", "/ledger", "/today", "/scorecard", "/messages", "/statement", "/chat", "/inject",
+  "/scenarios", "/demo", "/intake", "/review", "/api",
+];
 
 export default defineConfig({
   plugins: [react()],

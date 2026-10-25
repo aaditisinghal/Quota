@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type TimelineItem, type WorldState } from "./api";
+import { api, type ScenarioRun, type TimelineItem, type WorldState } from "./api";
 import { CaseView } from "./Case";
 import { ChatPane } from "./ChatPane";
 import { InjectScore } from "./InjectScore";
 import { Presenter } from "./Presenter";
+import { ScenarioMenu, ScenarioResult } from "./Scenarios";
 import { Timeline } from "./Timeline";
 import { TodayHealth } from "./TodayHealth";
 import { TraceView } from "./TraceView";
@@ -105,6 +106,28 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [refresh, presenting]);
 
+  const [menu, setMenu] = useState(false);
+  const [ran, setRan] = useState<ScenarioRun | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setMenu((m) => !m);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const onRan = useCallback(
+    (run: ScenarioRun, to: string) => {
+      setRan(run);
+      if (run.name === "impersonation") setPrincipal("jordan.kim");
+      resync();
+      window.location.hash = to;
+    },
+    [resync],
+  );
+
   const onMoved = useCallback(
     (to?: string) => {
       resync();
@@ -141,6 +164,9 @@ export function App() {
           </a>
         )}
         {offline && <span className="badge">API unreachable</span>}
+        <button onClick={() => setMenu(true)} title="Run a rehearsed scenario (⌘K / Ctrl+K)">
+          Scenarios <kbd>{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K"}</kbd>
+        </button>
         <button className={presenting ? "on" : ""} onClick={() => setPresenting((p) => !p)} title="Presenter mode: Back, Next, Reset">
           {presenting ? "Presenting" : "Present"}
         </button>
@@ -155,6 +181,7 @@ export function App() {
       </nav>
       <div className={`body ${tab === "case" ? "wide" : ""}`}>
         <main>
+          {ran && <ScenarioResult run={ran} onClose={() => setRan(null)} />}
           {tab === "case" && (
             <CaseView line={caseLine} items={items} people={people} pending={pending} principal={principal}
                       setPrincipal={setPrincipal} away={state?.away ?? {}} version={version} onChange={update} />
@@ -175,7 +202,8 @@ export function App() {
         </main>
         {tab !== "case" && <Timeline items={items} people={people} pending={pendingIds} />}
       </div>
-      {presenting && <Presenter onMoved={onMoved} onClose={() => setPresenting(false)} paused={false} />}
+      {presenting && <Presenter onMoved={onMoved} onClose={() => setPresenting(false)} paused={menu} />}
+      <ScenarioMenu open={menu} onClose={() => setMenu(false)} onRan={onRan} />
     </div>
   );
 }
