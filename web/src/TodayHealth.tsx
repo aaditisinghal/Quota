@@ -36,7 +36,7 @@ function TodayPanel({ today, people }: { today: Today; people: Principal[] }) {
   const waitingTotal = today.waiting.reduce((s, w) => s + w.total_cents, 0);
   return (
     <div className="panel">
-      <h2>Today, {today.day}</h2>
+      <h2>Today, {pt(today.day)}</h2>
       <div className="grid3">
         <div className={`col ${today.waiting.length ? "human" : ""}`}>
           <h3>

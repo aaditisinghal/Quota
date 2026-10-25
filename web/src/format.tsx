@@ -37,8 +37,10 @@ export function usd(cents: number | null | undefined): string {
   return cents < 0 ? `(${text})` : text;
 }
 
-// The company keeps Pacific time; the API speaks UTC. Midnight and 23:59:59 UTC are dates resolved from a plain
-// YYYY-MM-DD (a CRM close date), so they show as that date, not as an afternoon the day before.
+// The company keeps Pacific time; the API speaks UTC. A clock, an event time or a "known at" is an instant and is
+// shown in Pacific time. A value read from a record (a CRM close date, a contract date) at UTC midnight or
+// 23:59:59 was a plain YYYY-MM-DD before the resolver widened it, so it shows as that date, not as the afternoon
+// before: pass `date` for those.
 const PT = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Los_Angeles",
   month: "short",
@@ -54,10 +56,10 @@ export function setWorldYear(clock: string | null | undefined) {
   if (clock) worldYear = clock.slice(0, 4);
 }
 
-/** `2026-04-02T17:14:00Z` -> `Apr 2, 10:14 AM PT`; `2026-03-31` -> `Mar 31`. */
-export function pt(ts: string | null | undefined): string {
+/** `2026-04-02T17:14:00Z` -> `Apr 2, 10:14 AM PT`; `2026-03-31` (or, with `date`, `2026-03-31T23:59:59Z`) -> `Mar 31`. */
+export function pt(ts: string | null | undefined, date = false): string {
   if (!ts) return "";
-  const day = ts.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?(?:T(?:00:00:00|23:59:59)Z)?$/);
+  const day = ts.match(date ? /^(\d{4})-(\d{2})(?:-(\d{2}))?(?:T(?:00:00:00|23:59:59)Z)?$/ : /^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
   if (day) {
     const [, y, m, d] = day;
     const text = d ? `${MONTHS[Number(m) - 1]} ${Number(d)}` : MONTHS[Number(m) - 1];
@@ -70,11 +72,11 @@ export function pt(ts: string | null | undefined): string {
 }
 
 /** A time in plain English, the raw ISO in its tooltip. */
-export function When({ ts, className }: { ts: string | null | undefined; className?: string }) {
+export function When({ ts, className, date }: { ts: string | null | undefined; className?: string; date?: boolean }) {
   if (!ts) return null;
   return (
     <time className={className} dateTime={ts} title={ts}>
-      {pt(ts)}
+      {pt(ts, date)}
     </time>
   );
 }
@@ -181,7 +183,7 @@ export function Rich({ text, trace }: { text: string; trace?: string | null }) {
         </span>,
       );
     } else if (/^\d{4}-/.test(token)) {
-      parts.push(<When key={at} ts={token} />);
+      parts.push(<When key={at} ts={token} date />);
     } else {
       parts.push(WORDS[token] ?? token.replace(/_/g, " "));
     }

@@ -162,7 +162,7 @@ function display(field: string, value: unknown): string {
   if (value === null || value === undefined) return "";
   if (field.endsWith("_cents") && typeof value === "number") return usd(value);
   if (field === "term_months") return `${value} months`;
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) return pt(value);
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) return pt(value, true);
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 

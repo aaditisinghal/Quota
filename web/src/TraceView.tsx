@@ -223,7 +223,7 @@ function Value({ name, value }: { name: string; value: unknown }) {
 
 function fieldValue(field: string, value: unknown): string {
   if ((field === "base" || field === "amount") && typeof value === "number") return usd(value);
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? pt(value) : str(value);
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? pt(value, true) : str(value);
 }
 
 function RootCard({ node, trace, people }: { node: TraceNode; trace: Trace; people: Principal[] }) {
@@ -388,7 +388,7 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
         <dl>
           <Field label="Scope">{str(n.scope)}</Field>
           <Field label="Override">{str(n.override)}</Field>
-          <Field label="In force">{`${str(n.effective_from)} to ${str(n.expires_at)}`}</Field>
+          <Field label="In force">{`${pt(str(n.effective_from))} to ${pt(str(n.expires_at), true)}`}</Field>
         </dl>
       );
     case "approval":
