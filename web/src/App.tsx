@@ -2,35 +2,68 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isMissing, type ScenarioRun, type TimelineItem, type WorldState } from "./api";
 import { CaseView } from "./Case";
 import { ChatPane } from "./ChatPane";
+import { HomeView } from "./Home";
 import { InjectScore } from "./InjectScore";
 import { IntakeView } from "./Intake";
 import { Presenter } from "./Presenter";
+import { RepView, RepsBoard } from "./Reps";
 import { ScenarioMenu, ScenarioResult } from "./Scenarios";
 import { Timeline } from "./Timeline";
 import { TodayHealth } from "./TodayHealth";
 import { TraceView } from "./TraceView";
 import { When, learnAccountsFromText, setWorldYear, usd } from "./format";
+import "./cfo.css";
 
-type Tab = "case" | "trace" | "chat" | "today" | "inject" | "intake";
+type Tab = "home" | "case" | "reps" | "trace" | "chat" | "today" | "inject" | "intake";
 const TABS: [Tab, string][] = [
+  ["home", "Home"],
   ["case", "Case"],
+  ["reps", "Reps"],
   ["chat", "Chat"],
   ["trace", "Trace"],
   ["today", "Today + Ledger health"],
   ["inject", "Inject + Scorecard"],
   ["intake", "Intake"],
 ];
+// The CFO screens and the Case tab use the whole width; the others keep the Timeline on the right.
+const WIDE: Tab[] = ["home", "case", "reps"];
 
-function route(): { tab: Tab; id: string | null } {
-  const hash = decodeURIComponent(window.location.hash.slice(1));
-  if (hash.startsWith("trace/")) return { tab: "trace", id: hash.slice(6) };
-  if (hash.startsWith("case/")) return { tab: "case", id: hash.slice(5) };
-  if (TABS.some(([key]) => key === hash)) return { tab: hash as Tab, id: null };
-  return { tab: "case", id: null };
+/**
+ * Where the hash points. `id` is the case line, the trace target, or the rep (on `reps`, null for the board);
+ * `contract` and `calibrate` are the rep detail's focused contract and its calibration drawer; `source` is the
+ * Home drawer. Routes: #home, #home/source/{kind}, #reps, #rep/{id}[/{contract}[/calibration]], #case[/CL-x],
+ * #trace/{x} (x may itself contain a slash: deal/D-1), #chat, #today, #inject, #intake.
+ */
+type Route = { tab: Tab; id: string | null; contract: string | null; calibrate: boolean; source: string | null };
+
+function decode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+function parse(raw: string): Route | null {
+  const plain: Route = { tab: "home", id: null, contract: null, calibrate: false, source: null };
+  const hash = decode(raw);
+  if (hash.startsWith("trace/")) return { ...plain, tab: "trace", id: hash.slice(6) };
+  if (hash.startsWith("case/")) return { ...plain, tab: "case", id: hash.slice(5) };
+  const parts = raw.split("/").map(decode);
+  if (parts[0] === "home" && parts[1] === "source" && parts[2]) return { ...plain, source: parts[2] };
+  if (parts[0] === "rep" && parts[1]) {
+    return { ...plain, tab: "reps", id: parts[1], contract: parts[2] || null, calibrate: !!parts[2] && parts[3] === "calibration" };
+  }
+  if (TABS.some(([key]) => key === hash)) return { ...plain, tab: hash as Tab };
+  return null;
+}
+
+function route(): Route {
+  return parse(window.location.hash.slice(1)) ?? { tab: "home", id: null, contract: null, calibrate: false, source: null };
 }
 
 export function App() {
-  const [{ tab, id }, setRoute] = useState(route);
+  const [{ tab, id, contract, calibrate, source }, setRoute] = useState(route);
   const [traceId, setTraceId] = useState("CL-0001");
   const [caseLine, setCaseLine] = useState("CL-0001");
   const [state, setState] = useState<WorldState | null>(null);
@@ -141,7 +174,8 @@ export function App() {
   const onMoved = useCallback(
     (to?: string) => {
       resync();
-      if (to && TABS.some(([key]) => key === to)) window.location.hash = to;
+      // A presenter step may name a tab or a deeper route (rep/jordan.kim/D-1/calibration, home/source/crm).
+      if (to && parse(to.replace(/^#/, ""))) window.location.hash = to.replace(/^#/, "");
     },
     [resync],
   );
@@ -189,9 +223,14 @@ export function App() {
           </a>
         ))}
       </nav>
-      <div className={`body ${tab === "case" ? "wide" : ""}`}>
+      <div className={`body ${WIDE.includes(tab) ? "wide" : ""}`}>
         <main>
           {ran && <ScenarioResult run={ran} onClose={() => setRan(null)} />}
+          {tab === "home" && <HomeView people={people} version={version} onChange={update} source={source} />}
+          {tab === "reps" && !id && <RepsBoard version={version} />}
+          {tab === "reps" && id && (
+            <RepView key={id} rep={id} contract={contract} calibrate={calibrate} people={people} version={version} onChange={update} />
+          )}
           {tab === "case" && (
             <CaseView line={caseLine} items={items} people={people} pending={pending} principal={principal}
                       setPrincipal={setPrincipal} away={state?.away ?? {}} version={version} onChange={update} />
@@ -211,7 +250,7 @@ export function App() {
             <InjectScore clock={state.clock} people={people} world={state.world} seed={state.seed} onChange={update} />
           )}
         </main>
-        {tab !== "case" && <Timeline items={items} people={people} pending={pendingIds} />}
+        {!WIDE.includes(tab) && <Timeline items={items} people={people} pending={pendingIds} />}
       </div>
       {presenting && <Presenter onMoved={onMoved} onClose={() => setPresenting(false)} paused={menu} />}
       <ScenarioMenu open={menu} onClose={() => setMenu(false)} onRan={onRan} />

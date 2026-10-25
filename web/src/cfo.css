@@ -1,0 +1,184 @@
+/* The CFO screens (D2–D5): Home, the reps board, rep detail, the side drawer and the confidence badge.
+   Same system as styles.css: ink on paper, tabular numbers, and the one accent only for what needs a person.
+   styles.css loads after this file, so selectors here are compound where they meet a shared class. */
+
+/* ---- KPI strip ---- */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+.tile.kpi { background: var(--panel); padding: 12px 14px; }
+.tile.kpi .tile-value { font-size: 26px; letter-spacing: -0.01em; line-height: 1.2; }
+.tile.kpi .tile-value a.money { border-bottom-width: 2px; font-weight: 600; }
+.tile.kpi .tile-note { margin-top: 2px; }
+.tile.kpi.human { border-color: var(--accent-line); background: var(--accent-bg); }
+.tile.kpi.human .tile-value, .tile.kpi.human .tile-value a.money { color: var(--accent); }
+.tile.kpi.human .tile-value a.money { border-bottom-color: var(--accent-line); }
+@media (max-width: 800px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---- Home: sources on the left, Needs you on the right ---- */
+.home-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(360px, 1fr); gap: 20px; align-items: start; }
+.home-grid > div > h3:first-child, .needs-you > h3:first-child { margin-top: 0; }
+@media (max-width: 1100px) { .home-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.rail { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+a.card.source-card { display: block; text-decoration: none; color: inherit; transition: border-color 120ms; }
+a.card.source-card:hover { border-color: var(--ink-3); }
+a.card.source-card.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.source-card .card-head { justify-content: space-between; margin-bottom: 2px; }
+.source-count { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.25; }
+.source-detail { margin-top: 4px; font-size: 12px; }
+
+/* ---- side drawer ---- */
+.drawer-wrap { position: fixed; inset: 0; z-index: 15; background: rgba(15, 17, 20, 0.28); }
+.drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: min(560px, 100%);
+  display: flex; flex-direction: column; background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.14); animation: drawer-in 160ms ease-out;
+}
+.drawer.wide { width: min(880px, 100%); }
+.drawer-head { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.drawer-head h2 { margin: 0; flex: 1; min-width: 0; font-size: 17px; }
+.drawer-close {
+  text-decoration: none; color: var(--ink-2); font-size: 15px; line-height: 1; width: 30px; height: 30px;
+  display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px;
+}
+.drawer-close:hover { color: var(--ink); border-color: var(--ink-3); }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 40px; }
+.drawer-body > input:first-child { margin-bottom: 12px; }
+.drawer-body .table-wrap { max-width: 100%; }
+/* the presenter bar (z 20) stays on top; keep the drawer's last rows clear of it */
+.app.presenting .drawer-body { padding-bottom: 110px; }
+@keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .drawer { animation: none; } }
+@media (max-width: 640px) {
+  .drawer, .drawer.wide { width: 100%; border-left: 0; }
+  .drawer-head, .drawer-body { padding-left: 16px; padding-right: 16px; }
+  .app.presenting .drawer-body { padding-bottom: 150px; }
+}
+
+/* ---- raw viewer: a document page with its quoted spans, and source rows with extracted fields marked ---- */
+pre.page {
+  font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 0 0 12px;
+  max-height: 52vh; overflow-y: auto;
+}
+pre.page mark, .raw-rows mark, mark.legend { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 2px; }
+pre.page mark { box-shadow: 0 1px 0 var(--ink-3); cursor: help; }
+mark.legend { padding: 0 5px; }
+.table.raw-rows th, .table.raw-rows td { font-size: 12px; white-space: nowrap; }
+.table.raw-rows th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.table.raw-rows td { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.table.raw-rows td.hl { font-weight: 500; }
+.table.raw-rows tbody tr:hover td { background: var(--line-2); }
+
+/* ---- Needs you inbox: everything here waits on a person, so it carries the accent ---- */
+.needs-you { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px 16px; min-width: 0; }
+.needs-you.human-panel { border-color: var(--accent-line); }
+.needs-you.human-panel > h3, .needs-you.human-panel > h3 .total { color: var(--accent); }
+.ny-person { margin-top: 12px; }
+.ny-person > .who-name { margin-bottom: 6px; font-size: 13.5px; }
+.card.ny-item { margin-bottom: 8px; }
+.ny-impact { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px; }
+.ny-question { margin: 2px 0 6px; font-size: 13.5px; }
+.ny-evidence { margin: 0 0 6px; padding-left: 18px; font-size: 12.5px; color: var(--ink-2); }
+.ny-evidence li { margin: 2px 0; }
+.ny-evidence strong { color: var(--ink); font-weight: 600; }
+.ny-chain { background: var(--panel); border: 1px solid var(--accent-line); border-radius: 6px; margin-bottom: 6px; }
+.ny-chain .tl { padding: 6px 10px; }
+.ny-chain .tl:last-child { border-bottom: 0; }
+.ny-chain .tl-text { font-size: 12.5px; }
+.ny-answer { display: grid; gap: 6px; margin-top: 8px; }
+.ny-answer textarea { resize: vertical; min-height: 34px; background: var(--panel); }
+.ny-answer .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---- confidence badge: score plus band in words; held needs a person ---- */
+.conf {
+  display: inline-flex; align-items: center; gap: 6px; padding: 1px 9px 1px 2px; border: 1px solid var(--line);
+  border-radius: 999px; font-size: 12px; text-decoration: none; white-space: nowrap; background: var(--panel); vertical-align: middle;
+}
+a.conf:hover { border-color: var(--ink-3); }
+.conf-score {
+  font-variant-numeric: tabular-nums; font-weight: 700; min-width: 26px; text-align: center; padding: 0 6px;
+  border-radius: 999px; background: var(--line-2); color: var(--ink);
+}
+.conf-band { color: var(--ink-2); }
+.conf.conf-cleared .conf-band { color: var(--ok); }
+.conf.conf-note { border-style: dashed; border-color: var(--ink-3); }
+.conf.conf-held { border-color: var(--accent-line); background: var(--accent-bg); }
+.conf.conf-held .conf-score { background: var(--accent); color: var(--panel); }
+.conf.conf-held .conf-band { color: var(--accent); font-weight: 600; }
+a.conf.conf-held:hover { border-color: var(--accent); }
+
+/* not from a source system */
+.tag.simulated {
+  border-style: dashed; border-color: var(--ink-3); color: var(--ink-3); font-size: 11px; font-weight: 400;
+  text-transform: none; letter-spacing: 0; white-space: nowrap; background: transparent; vertical-align: middle;
+}
+
+/* the six factors; the weakest row is the `changed` row from styles.css */
+.table.factors td { font-size: 12.5px; }
+.table.factors td:first-child { white-space: nowrap; font-weight: 500; }
+.table.factors td.num { width: 56px; }
+
+/* ---- reps board ---- */
+.table.reps-table td { vertical-align: middle; padding-top: 8px; padding-bottom: 8px; }
+.table.reps-table td a:not(.money):not(.conf) { text-decoration: none; }
+.table.reps-table td a:not(.money):not(.conf):hover strong { text-decoration: underline; }
+.table.reps-table tr.human-row td { background: var(--accent-bg); }
+.table.reps-table tr.human-row td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.stage-mini { display: flex; flex-wrap: wrap; gap: 0 10px; font-size: 11.5px; margin-top: 1px; }
+.stage-mini span { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.status { display: inline-block; font-size: 11.5px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.status.status-cleared { color: var(--ok); }
+.status.status-note { color: var(--ink-2); border-style: dashed; border-color: var(--ink-3); }
+.status.status-held { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-line); font-weight: 600; }
+
+/* ---- rep detail: pipeline lanes ---- */
+.rep .panel > h3:first-child { margin-top: 0; }
+.lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.lane { background: var(--line-2); border-radius: 8px; padding: 8px; min-height: 90px; min-width: 0; }
+.lane-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-2); padding: 0 2px 6px; }
+.card.pipeline-card { border-style: dashed; border-color: var(--ink-3); padding: 8px 10px; margin-top: 6px; }
+.card.pipeline-card .money { font-size: 15px; font-weight: 600; }
+@media (max-width: 1000px) { .lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .lanes { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- contracts, expansions as children with a connector ---- */
+.contracts { display: grid; gap: 12px; }
+.card.contract { scroll-margin: 90px; transition: box-shadow 160ms, border-color 160ms; }
+.card.contract.focused { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.card.contract dl { margin-top: 4px; }
+.contract-name { font-size: 15px; font-weight: 600; }
+.card.contract .card-head .conf { margin-left: auto; }
+.child { position: relative; margin-left: 30px; padding-top: 8px; }
+.child::before {
+  content: ""; position: absolute; left: -18px; top: 0; height: 32px; width: 14px;
+  border-left: 2px solid var(--line); border-bottom: 2px solid var(--line); border-bottom-left-radius: 6px;
+}
+.child:not(:last-child)::after { content: ""; position: absolute; left: -18px; top: 0; bottom: 0; border-left: 2px solid var(--line); }
+.card.contract.expansion { background: var(--paper); }
+@media (max-width: 560px) { .child { margin-left: 18px; } .child::before, .child:not(:last-child)::after { left: -12px; } .child::before { width: 9px; } }
+
+/* everyone paid on a contract */
+.chips.connected { margin: 10px 0 4px; }
+.chip.person-chip { border: 1px solid var(--line); text-decoration: none; display: inline-flex; gap: 4px; align-items: baseline; }
+a.chip.person-chip:hover { border-color: var(--ink-3); }
+.chip.person-chip.on .muted { color: inherit; opacity: 0.75; }
+
+.split-bar { display: flex; gap: 2px; height: 26px; border-radius: 6px; overflow: hidden; margin: 10px 0 2px; background: var(--panel); }
+.segment {
+  flex-basis: 0; min-width: 24px; display: flex; align-items: center; padding: 0 8px; font-size: 11.5px;
+  font-variant-numeric: tabular-nums; text-decoration: none; white-space: nowrap; overflow: hidden;
+}
+.segment span { overflow: hidden; text-overflow: ellipsis; }
+a.segment[href]:hover { filter: brightness(1.12); text-decoration: underline; }
+a.segment:not([href]) { cursor: default; }
+/* shades of ink, never hues: the order is the server's, the label says who */
+.segment.seg-0 { background: var(--ink); color: var(--paper); }
+.segment.seg-1 { background: color-mix(in srgb, var(--ink) 74%, var(--paper)); color: var(--paper); }
+.segment.seg-2 { background: color-mix(in srgb, var(--ink) 56%, var(--paper)); color: var(--paper); }
+.segment.seg-3 { background: color-mix(in srgb, var(--ink) 34%, var(--paper)); color: var(--ink); }
+.segment.seg-4 { background: color-mix(in srgb, var(--ink) 20%, var(--paper)); color: var(--ink); }
+.segment.seg-5 { background: color-mix(in srgb, var(--ink) 10%, var(--paper)); color: var(--ink); }
+
+.calibrate-link { display: inline-block; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); text-decoration: none; border-bottom: 1px dotted var(--ink-3); }
+.calibrate-link:hover { color: var(--ink); border-bottom-style: solid; }

@@ -267,6 +267,168 @@ export type Intake = {
   };
 };
 
+// The CFO demo flow (DEMO_FLOW_TASKS D1-D5). Every figure is the server's; the screens only lay it out.
+export type Band = "cleared" | "note" | "held";
+
+export type Factor = { name: string; value: number; reason: string };
+
+export type Confidence = {
+  line: string;
+  deal?: string;
+  decision?: string;
+  score: number;
+  band: Band;
+  band_text?: string;
+  factors: Factor[];
+  stored?: { score: number; band: Band; factors: Factor[] } | Record<string, unknown> | null;
+  hold?: { decision: string; kind: string; reason: string } | null;
+};
+
+export type Calibration = {
+  line: string;
+  deal?: string;
+  rep?: string;
+  decision?: string;
+  evidence: { source: string; field?: string; value: unknown; agrees: boolean | null; label?: string; ref?: string | null }[];
+  rules: { field: string; rule: string; chosen: unknown; alternatives?: unknown[] }[];
+  amount: {
+    total?: number;
+    total_cents?: number;
+    credit_cents?: number;
+    base_portion?: number;
+    accel_portion?: number;
+    base_portion_cents?: number;
+    accel_portion_cents?: number;
+    tier?: string;
+    quarter?: string;
+    prior_credit_cents?: number;
+    rate?: number | string;
+    [k: string]: unknown;
+  };
+  confidence: Confidence;
+  outcome: {
+    status: string;
+    line_status?: string;
+    files?: unknown;
+    text: string;
+    asked?: (Partial<NeedsYouItem> & { person: string; question: string; item?: string }) | null;
+    approval?: string | null;
+  };
+};
+
+export type Source = { kind: string; label: string; count: number; via?: string; last_sync?: string | null; detail?: string };
+
+export type SourceRows = {
+  kind: string;
+  columns: string[];
+  total?: number;
+  // highlight: the extracted columns, or for a message the quoted spans of its text
+  rows: ({ highlight?: string[]; ref?: string } & Record<string, unknown>)[];
+};
+
+export type RepRow = {
+  rep: string;
+  name: string;
+  state?: string;
+  left?: string | null;
+  pipeline: { total_cents: number; by_stage: Record<string, number>; deals: number; simulated: boolean };
+  booked_quarter_cents: number;
+  quarter: string;
+  attainment_bps: number | null;
+  pending_cents: number;
+  lowest_confidence: number | null;
+  status: string; // Held | Note | Cleared
+};
+
+export type Recipient = {
+  kind: string; // rep, manager_override (later: se_pool, partner, account_manager)
+  who: string;
+  name?: string;
+  share_bps: number;
+  rate_bps?: number;
+  paid_via?: string;
+  note?: string;
+  line: string | null;
+  confidence: Confidence | null;
+  transfer?: string | null;
+};
+
+export type ContractChild = {
+  id: string;
+  version: number;
+  signed_at: string;
+  acv_cents: number;
+  incremental_lines: string[] | { id: string; amount_cents: number }[];
+  incremental_commission_cents: number;
+};
+
+export type ContractCard = {
+  id: string; // the deal id
+  customer: string;
+  acv_cents: number;
+  term_months: number;
+  billing?: string;
+  ramp?: string | null;
+  clauses?: Record<string, unknown>;
+  countersigned_at?: string | null;
+  countersigned_local?: string | null;
+  paid?: boolean;
+  overdue?: boolean;
+  lines: { id: string; rep: string; amount_cents: number; quarter: string; status: string }[];
+  viewer?: string | null;
+  recipients: Recipient[];
+  children: ContractChild[];
+  parent: string | null;
+  split_bar: { who: string; share_bps: number; line: string | null }[];
+};
+
+export type OpenDeal = {
+  id: string;
+  account: string;
+  stage: string;
+  amount_cents: number;
+  expected_close?: string;
+  forecast_commission_cents: number;
+  earned: false;
+  simulated: true;
+};
+
+export type RepDetail = {
+  rep: string;
+  name?: string;
+  title?: string;
+  state?: string;
+  manager?: string;
+  left?: string | null;
+  pipeline: { simulated: boolean; stages: string[]; deals: OpenDeal[] };
+  contracts: ContractCard[];
+};
+
+export type NeedsYouItem = {
+  id: string;
+  kind: string;
+  person?: string;
+  question: string;
+  impact_cents: number;
+  deals?: string[];
+  evidence?: { decision?: string; text?: string; ref?: string }[];
+  chain?: { at: string; text: string }[];
+  answer?: "approve_reject" | "reply";
+};
+
+export type NeedsYou = { count: number; people: { person: string; name?: string; title: string; items: NeedsYouItem[] }[] };
+
+export type Home = {
+  clock?: string;
+  period?: string;
+  pending_cents: number;
+  pending_lines?: number;
+  cleared_pct: number | null;
+  held_cents: number;
+  held_by_reason: Record<string, number>;
+  needs_you: number;
+};
+
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, body === undefined ? undefined : {
     method: "POST",
@@ -285,7 +447,20 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+const seg = encodeURIComponent;
+
 export const api = {
+  home: () => call<Home>("/home"),
+  sources: () => call<Source[]>("/sources"),
+  sourceRows: (kind: string, q: string) => call<SourceRows>(`/sources/${seg(kind)}/rows${q ? `?q=${seg(q)}` : ""}`),
+  reps: () => call<RepRow[]>("/reps"),
+  rep: (id: string) => call<RepDetail>(`/reps/${seg(id)}`),
+  contract: (id: string, viewer?: string) => call<ContractCard>(`/contracts/${seg(id)}${viewer ? `?viewer=${seg(viewer)}` : ""}`),
+  confidence: (line: string) => call<Confidence>(`/lines/${seg(line)}/confidence`),
+  calibration: (line: string) => call<Calibration>(`/lines/${seg(line)}/calibration`),
+  needsYou: () => call<NeedsYou>("/needs-you"),
+  answer: (id: string, as_principal: string, decision: "approve" | "reject" | "reply", text: string) =>
+    call<{ id: string; ok: boolean; result?: unknown; refused?: unknown }>(`/needs-you/${seg(id)}/answer`, { as_principal, decision, text }),
   state: () => call<WorldState>("/state"),
   timeline: (since: number) => call<{ clock: string; items: TimelineItem[] }>(`/timeline?since=${since}`),
   trace: (id: string, asOf: string | null) =>
