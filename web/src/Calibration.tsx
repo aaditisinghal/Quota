@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { api, type Calibration, type Message, type Principal } from "./api";
 import { Money, Reply, Rich, When, personName, sourceName } from "./format";
-import { ConfidenceBadge, Drawer, Factors, Unavailable, pct, useApi } from "./ui";
+import { ConfidenceBadge, Drawer, ErrorNote, Factors, Loading, Unavailable, pct, useApi } from "./ui";
 import "./calibration.css";
 
 // D5: how Quota settled one commission line. What every source says, the written rule that settled each
@@ -102,10 +102,10 @@ export function CalibrationDrawer({ line, title, back, people, version, onChange
       <div className="calib">
         {cal.missing ? (
           <Unavailable what="The calibration panel" path={`/api/lines/${line}/calibration`} />
-        ) : cal.error ? (
-          <p className="error">{cal.error}</p>
+        ) : cal.error && !cal.data ? (
+          <ErrorNote what={`how Quota settled ${line}`} error={cal.error} onRetry={cal.reload} />
         ) : !cal.data ? (
-          <p className="muted">Loading how Quota settled {line}…</p>
+          <Loading label={`Loading how Quota settled ${line}`} rows={6} />
         ) : (
           <Panel c={cal.data} line={line} people={people} onAnswered={answered} />
         )}
@@ -142,8 +142,8 @@ function Panel({ c, line, people, onAnswered }: { c: Calibration; line: string; 
                   <td>
                     <Value v={e.value} field={e.field} trace={line} />
                   </td>
-                  <td className={`calib-agree ${e.agrees === true ? "yes" : e.agrees === false ? "no" : "none"}`}>
-                    {e.agrees === true ? "✓ agrees" : e.agrees === false ? "! disagrees" : (e.label ?? "—")}
+                  <td className="calib-agree">
+                    <Agreement agrees={e.agrees} label={e.label} />
                   </td>
                   <td className="mono muted calib-ref">{e.ref}</td>
                 </tr>
@@ -225,6 +225,32 @@ function Panel({ c, line, people, onAnswered }: { c: Calibration; line: string; 
       <Outcome c={c} line={line} people={people} onAnswered={onAnswered} />
     </>
   );
+}
+
+/** Agrees or disagrees as a pill: a mark and the words, never colour alone. No claim stays a quiet dash. */
+function Agreement({ agrees, label }: { agrees: boolean | null | undefined; label?: string | null }) {
+  if (agrees === true) {
+    return (
+      <span className="agree-pill yes">
+        <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
+          <path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        agrees
+      </span>
+    );
+  }
+  if (agrees === false) {
+    return (
+      <span className="agree-pill no">
+        <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
+          <path d="M2.5 4.5h7M2.5 7.5h7M7.5 2l-3 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+        disagrees
+      </span>
+    );
+  }
+  const text = label && label !== "—" && !/^\W+$/.test(label) ? label : null;
+  return text ? <span className="agree-pill none">{text}</span> : <span className="agree-none" title="This source makes no claim to compare">—</span>;
 }
 
 function Outcome({ c, line, people, onAnswered }: { c: Calibration; line: string; people: Principal[]; onAnswered: () => void }) {

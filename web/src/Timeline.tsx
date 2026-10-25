@@ -17,10 +17,12 @@ export function Timeline({ items, people, pending }: { items: TimelineItem[]; pe
   return (
     <aside className="timeline" aria-label="Timeline">
       <div className="timeline-head">
-        <h2>Timeline</h2>
-        <div className="chips" role="tablist">
+        <h2>
+          Timeline <span className="muted">{shown.length}</span>
+        </h2>
+        <div className="chips" role="group" aria-label="Show">
           {Object.keys(FILTERS).map((f) => (
-            <button key={f} className={`chip ${f === filter ? "on" : ""}`} onClick={() => setFilter(f)}>
+            <button key={f} className={`chip ${f === filter ? "on" : ""}`} aria-pressed={f === filter} onClick={() => setFilter(f)}>
               {f}
             </button>
           ))}
@@ -30,7 +32,9 @@ export function Timeline({ items, people, pending }: { items: TimelineItem[]; pe
         {shown.map((item) => (
           <TimelineRow key={item.seq} item={item} people={people} human={opens(item, pending)} />
         ))}
-        {shown.length === 0 && <li className="empty">Nothing yet.</li>}
+        {shown.length === 0 && (
+          <li className="empty">{filter === "All" ? "Nothing has happened yet." : `No ${filter.toLowerCase()} yet.`}</li>
+        )}
       </ol>
     </aside>
   );
@@ -46,10 +50,12 @@ export function TimelineRow({ item, people, human }: { item: TimelineItem; peopl
   return (
     <li className={`tl kind-${item.kind.toLowerCase()} ${human ? "human" : ""}`}>
       <div className="tl-meta">
-        <When ts={item.clock} />
-        <span className="actor">{personName(item.actor, people)}</span>
         <span className="kind">{item.kind}</span>
+        <span className="actor">{personName(item.actor, people)}</span>
         {human && <span className="badge accent">needs a person</span>}
+        <span className="tl-when">
+          <When ts={item.clock} />
+        </span>
       </div>
       <div className="tl-text">
         <Reply text={item.text} />

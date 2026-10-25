@@ -1,49 +1,72 @@
 /* D5: the calibration panel. Scoped under .calib; the accent is only for an outcome that needs a person. */
 
-.calib { display: flex; flex-direction: column; gap: 14px; }
-.calib-sec { border-top: 1px solid var(--line); padding-top: 10px; }
+.calib { display: flex; flex-direction: column; gap: 24px; }
+.calib-sec { border-top: 1px solid var(--line-2); padding-top: 20px; min-width: 0; }
 .calib-sec:first-child { border-top: 0; padding-top: 0; }
 .calib-sec h4 {
-  margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
+  margin: 0 0 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; line-height: 1.4;
   color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .calib-sec h4 .conf { text-transform: none; letter-spacing: 0; }
 .calib .table { width: 100%; border-collapse: collapse; }
+.calib .loading { padding-top: 0; }
 
 /* Evidence: source, what it says, agrees or not (in words), the raw ref. */
-.calib-evidence td { font-size: 13px; }
-.calib-src { white-space: nowrap; font-weight: 500; color: var(--ink); }
+.calib .calib-evidence td { font-size: 13px; vertical-align: middle; padding-top: 8px; padding-bottom: 8px; }
+.calib .calib-evidence td:first-child { padding-left: 0; }
+.calib .calib-evidence td:last-child { padding-right: 0; }
+.calib .calib-evidence tbody tr:hover td { background: #fcfbf9; }
+.calib .calib-src { white-space: nowrap; font-weight: 500; color: var(--ink); width: 1%; padding-right: 16px; }
 .calib-src .muted { font-size: 11.5px; font-weight: 400; }
-.calib-agree { white-space: nowrap; font-size: 12.5px; }
-.calib-agree.yes { color: var(--ink-2); }
-.calib-agree.no { color: var(--ink); font-weight: 600; }
-.calib-ref { font-size: 11.5px; overflow-wrap: anywhere; }
+.calib .calib-agree { white-space: nowrap; width: 1%; }
+.calib-ref { font-size: 11.5px; overflow-wrap: anywhere; color: var(--ink-3); }
 .calib-kv { display: inline-flex; flex-wrap: wrap; gap: 2px 12px; }
 
+/* agrees / disagrees: a mark plus the word. Disagreeing is ink (a rule settled it), not the accent. */
+.agree-pill {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; line-height: 18px; padding: 0 8px 0 6px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); white-space: nowrap;
+}
+.agree-pill svg { flex: none; }
+.agree-pill.yes { color: var(--ok); background: var(--ok-bg); border-color: var(--ok-line); }
+.agree-pill.no { color: var(--ink); border-color: var(--ink-3); background: var(--line-2); font-weight: 600; }
+.agree-pill.none { padding-left: 8px; }
+.agree-none { color: var(--ink-3); padding-left: 8px; }
+
 /* Rules that settled each disagreement. */
-.calib-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
-.calib-rules li { padding-left: 10px; border-left: 2px solid var(--line); }
-.calib-rules .mono { font-size: 12px; }
+.calib-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.calib-rules li { padding: 2px 0 2px 12px; border-left: 2px solid var(--line); }
+.calib-rules li > div + div { margin-top: 2px; }
+.calib-rules .mono { font-size: 12px; background: var(--line-2); padding: 0 4px; border-radius: var(--r-sm); }
 
 /* Amount: the total large, the portions and rate under it. */
-.calib-total { font-size: 26px; line-height: 1.2; font-weight: 650; color: var(--ink); }
+.calib-total { font-size: 28px; line-height: 1.2; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .calib-total a.money { border-bottom-width: 2px; font-weight: 650; }
-.calib-parts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 6px 0 0; }
-.calib-parts > div { display: flex; flex-direction: column; }
+.calib-parts { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 12px 0 0; }
+.calib-parts > div { display: flex; flex-direction: column; gap: 2px; }
 .calib-parts dt { font-size: 11.5px; color: var(--ink-2); }
-.calib-parts dd { margin: 0; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.calib-parts dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
 
 /* Outcome. Held: someone has to answer, so it carries the accent. */
-.calib-outcome-text { margin: 0 0 6px; }
+.calib-outcome-text { margin: 0 0 8px; }
 .calib-outcome.held {
-  border: 1px solid var(--accent-line); background: var(--accent-bg); border-radius: 8px; padding: 10px 12px;
+  border: 1px solid var(--accent-line); background: var(--accent-bg); border-radius: var(--r-md); padding: 16px;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .calib-outcome.held h4 { color: var(--accent); }
-.calib-asked { margin-bottom: 8px; }
-.calib-answer { display: flex; flex-direction: column; gap: 6px; }
-.calib-answer textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
-.calib-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.calib-asked { margin-bottom: 12px; }
+.calib-answer { display: flex; flex-direction: column; gap: 8px; }
+.calib-answer textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; min-height: 38px; }
+.calib-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.calib-outcome .error { margin: 8px 0 0; }
 
 /* Dispute thread. */
-.calib-case { margin-left: auto; font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.calib-case { margin-left: auto; font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--ink-2); text-decoration: none; border-bottom: 1px dotted var(--ink-3); transition: color var(--t) var(--ease); }
+.calib-case:hover { color: var(--ink); border-bottom-style: solid; }
 .calib-thread .thread { margin: 4px 0 0; max-height: 40vh; }
+
+@media (max-width: 640px) {
+  .calib .calib-evidence td { display: block; width: auto; padding: 2px 0; border-bottom: 0; }
+  .calib .calib-evidence tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--line-2); }
+  .calib .calib-src { white-space: normal; }
+}

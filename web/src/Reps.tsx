@@ -1,82 +1,120 @@
-import { useEffect } from "react";
-import { api, type Band, type ContractCard, type ContractChild, type OpenDeal, type Principal, type Recipient, type RepDetail } from "./api";
+import { useEffect, type MouseEvent } from "react";
+import { api, type Band, type ContractCard, type ContractChild, type OpenDeal, type Principal, type Recipient, type RepDetail, type RepRow } from "./api";
 import { CalibrationDrawer } from "./Calibration";
 import { Money, When, personName, pt, usd } from "./format";
-import { ConfidenceBadge, Simulated, Unavailable, pct, useApi } from "./ui";
+import { ConfidenceBadge, Empty, ErrorNote, Loading, Simulated, Unavailable, pct, useApi } from "./ui";
 
 // D3 + D4: every rep at a glance, in the server's needs-attention order, then one rep's open pipeline and
 // booked contracts, with everyone else paid on each contract one click away.
 
 const band = (status: string): Band => (status.toLowerCase() === "held" ? "held" : status.toLowerCase() === "note" ? "note" : "cleared");
 
+const STATUS_MARK: Record<Band, string> = { held: "!", note: "·", cleared: "✓" };
+
+/** Clicking anywhere on a row opens the rep, unless the click was on a link or button of its own. */
+function openRow(e: MouseEvent<HTMLTableRowElement>, href: string) {
+  if (e.defaultPrevented || e.button !== 0) return;
+  const target = e.target as HTMLElement;
+  if (target.closest("a, button, input, textarea, select, summary")) return;
+  if (window.getSelection()?.toString()) return; // selecting text is not a click
+  if (e.metaKey || e.ctrlKey) {
+    window.open(href, "_blank");
+    return;
+  }
+  window.location.hash = href.slice(1);
+}
+
 export function RepsBoard({ version }: { version: number }) {
   const reps = useApi(() => api.reps(), [version]);
   if (reps.missing) return <Unavailable what="The reps board" path="/api/reps" />;
-  if (!reps.data) return <p className="muted">{reps.error ?? "Loading reps…"}</p>;
+  if (!reps.data && reps.error) return <ErrorNote what="the reps board" error={reps.error} onRetry={reps.reload} />;
+  if (!reps.data) return <Loading label="Loading reps" rows={4} panel />;
   const stages = Object.keys(reps.data[0]?.pipeline.by_stage ?? {});
   return (
     <section className="reps">
       <div className="panel">
         <h2>
-          Reps <span className="muted">needing attention first · open pipeline is <Simulated /></span>
+          Reps <span className="muted reps-sub">needing attention first · open pipeline is <Simulated /></span>
         </h2>
-        <div className="table-wrap">
-          <table className="table reps-table">
-            <thead>
-              <tr>
-                <th>Rep</th>
-                <th>Open pipeline</th>
-                <th className="num">Booked {reps.data[0]?.quarter ?? "this quarter"}</th>
-                <th className="num">Attainment</th>
-                <th className="num">Pending commission</th>
-                <th>Lowest confidence</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reps.data.map((r) => (
-                <tr key={r.rep} className={band(r.status) === "held" ? "human-row" : ""}>
-                  <td>
-                    <a href={`#rep/${encodeURIComponent(r.rep)}`}>
-                      <strong>{r.name}</strong>
-                    </a>
-                    {r.left && <div className="muted">left {pt(r.left, true)}</div>}
-                  </td>
-                  <td>
-                    <span className="money plain">{usd(r.pipeline.total_cents)}</span>{" "}
-                    <span className="muted">{r.pipeline.deals} deals</span>
-                    <div className="stage-mini muted">
-                      {stages.filter((s) => r.pipeline.by_stage[s]).map((s) => (
-                        <span key={s}>
-                          {s} {usd(r.pipeline.by_stage[s])}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="num">
-                    <a className="money" href={`#rep/${encodeURIComponent(r.rep)}`} title="The contracts behind it">
-                      {usd(r.booked_quarter_cents)}
-                    </a>
-                  </td>
-                  <td className="num">{pct(r.attainment_bps)}</td>
-                  <td className="num">
-                    <a className="money" href={`#rep/${encodeURIComponent(r.rep)}`} title="The lines behind it">
-                      {usd(r.pending_cents)}
-                    </a>
-                  </td>
-                  <td>
-                    <ConfidenceBadge score={r.lowest_confidence} band={band(r.status)} />
-                  </td>
-                  <td>
-                    <span className={`status status-${band(r.status)}`}>{r.status}</span>
-                  </td>
+        {reps.data.length === 0 ? (
+          <Empty title="No reps yet">
+            <p>Reps appear here once the HR source has people on a commission plan.</p>
+          </Empty>
+        ) : (
+          <div className="table-wrap">
+            <table className="table reps-table">
+              <thead>
+                <tr>
+                  <th>Rep</th>
+                  <th>Open pipeline</th>
+                  <th className="num">Booked {reps.data[0]?.quarter ?? "this quarter"}</th>
+                  <th className="num">Attainment</th>
+                  <th className="num">Pending commission</th>
+                  <th>Lowest confidence</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {reps.data.map((r) => (
+                  <RepBoardRow key={r.rep} r={r} stages={stages} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </section>
+  );
+}
+
+/** One rep on the board; the whole row opens the rep, the name is the link for the keyboard. */
+function RepBoardRow({ r, stages }: { r: RepRow; stages: string[] }) {
+  const href = `#rep/${encodeURIComponent(r.rep)}`;
+  const b = band(r.status);
+  return (
+    <tr className={`row-link ${b === "held" ? "human-row" : ""}`} onClick={(e) => openRow(e, href)}>
+      <td>
+        <a href={href}>
+          <strong>{r.name}</strong>
+          <span className="rep-arrow" aria-hidden="true">
+            →
+          </span>
+        </a>
+        {r.left && <div className="muted">left {pt(r.left, true)}</div>}
+      </td>
+      <td>
+        <span className="money plain">{usd(r.pipeline.total_cents)}</span> <span className="muted">{r.pipeline.deals} deals</span>
+        <div className="stage-mini muted">
+          {stages.filter((s) => r.pipeline.by_stage[s]).map((s) => (
+            <span key={s}>
+              {s} {usd(r.pipeline.by_stage[s])}
+            </span>
+          ))}
+        </div>
+      </td>
+      <td className="num">
+        <a className="money" href={href} title="The contracts behind it">
+          {usd(r.booked_quarter_cents)}
+        </a>
+      </td>
+      <td className="num">{pct(r.attainment_bps)}</td>
+      <td className="num">
+        <a className="money" href={href} title="The lines behind it">
+          {usd(r.pending_cents)}
+        </a>
+      </td>
+      <td>
+        <ConfidenceBadge score={r.lowest_confidence} band={b} />
+      </td>
+      <td>
+        <span className={`status status-${b}`}>
+          <span className="status-mark" aria-hidden="true">
+            {STATUS_MARK[b]}
+          </span>
+          {r.status}
+        </span>
+      </td>
+    </tr>
   );
 }
 
@@ -90,7 +128,8 @@ export function RepView({ rep, contract, calibrate, people, version, onChange }:
   }, [contract, detail.data]);
 
   if (detail.missing) return <Unavailable what="Rep detail" path={`/api/reps/${rep}`} />;
-  if (!detail.data) return <p className="muted">{detail.error ?? `Loading ${rep}…`}</p>;
+  if (!detail.data && detail.error) return <ErrorNote what={personName(rep, people)} error={detail.error} onRetry={detail.reload} />;
+  if (!detail.data) return <Loading label={`Loading ${personName(rep, people)}`} rows={5} panel />;
   const d = detail.data;
   const open = contract ? d.contracts.find((c) => c.id === contract) : undefined;
   const mine = open ? viewerRecipient(open, rep) : undefined;
@@ -141,7 +180,11 @@ export function RepView({ rep, contract, calibrate, people, version, onChange }:
             ))}
           </div>
         ))}
-        {d.contracts.length === 0 && <p className="muted">No booked contracts.</p>}
+        {d.contracts.length === 0 && (
+          <Empty title="No booked contracts">
+            <p>Contracts show here once one is countersigned for {d.name ?? personName(rep, people)}.</p>
+          </Empty>
+        )}
       </div>
       {calibrate && open && mine?.line && (
         <CalibrationDrawer line={mine.line} title={`${open.customer} · ${personName(rep, people)}`} back={`rep/${rep}/${open.id}`}

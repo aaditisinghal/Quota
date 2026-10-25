@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FlashMoney, FlashText } from "./Flash";
 import { api, type Health, type Principal, type Today } from "./api";
 import { Money, Rich, TraceLink, When, personName, pt, usd } from "./format";
+import { ErrorNote, Loading } from "./ui";
 
 // Balances at the previous clock the health screen saw, so a change (an injected churn) shows what moved.
 let seen: { clock: string; balances: Record<string, number> } | null = null;
@@ -10,24 +11,56 @@ let baseline: { clock: string; balances: Record<string, number> } | null = null;
 export function TodayHealth({ version, people }: { version: number; people: Principal[] }) {
   const [today, setToday] = useState<Today | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  // Each call settles once per version: until then a skeleton, after a failure a card that says so.
+  const [failed, setFailed] = useState<{ today?: string; health?: string }>({});
+  const [settled, setSettled] = useState({ today: false, health: false });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    api.today().then(setToday).catch(() => setToday(null));
+    let live = true;
+    api
+      .today()
+      .then((t) => live && (setToday(t), setFailed((f) => ({ ...f, today: undefined }))))
+      .catch((e) => live && (setToday(null), setFailed((f) => ({ ...f, today: (e as Error).message }))))
+      .finally(() => live && setSettled((s) => ({ ...s, today: true })));
     api
       .health()
       .then((h) => {
+        if (!live) return;
         const balances = Object.fromEntries(h.trial_balance.accounts.map((a) => [a.account, a.balance_cents]));
         if (seen && seen.clock !== h.clock) baseline = seen;
         seen = { clock: h.clock, balances };
         setHealth(h);
+        setFailed((f) => ({ ...f, health: undefined }));
       })
-      .catch(() => setHealth(null));
-  }, [version]);
+      .catch((e) => live && (setHealth(null), setFailed((f) => ({ ...f, health: (e as Error).message }))))
+      .finally(() => live && setSettled((s) => ({ ...s, health: true })));
+    return () => {
+      live = false;
+    };
+  }, [version, attempt]);
 
+  const retry = () => setAttempt((n) => n + 1);
   return (
     <section className="today-health">
-      {today && <TodayPanel today={today} people={people} />}
-      {health && <HealthPanel health={health} />}
+      {today ? (
+        <TodayPanel today={today} people={people} />
+      ) : failed.today ? (
+        <div className="panel">
+          <ErrorNote what="today" error={failed.today} onRetry={retry} />
+        </div>
+      ) : (
+        !settled.today && <Loading label="Loading today" rows={3} panel />
+      )}
+      {health ? (
+        <HealthPanel health={health} />
+      ) : failed.health ? (
+        <div className="panel">
+          <ErrorNote what="ledger health" error={failed.health} onRetry={retry} />
+        </div>
+      ) : (
+        !settled.health && <Loading label="Loading ledger health" rows={5} panel />
+      )}
     </section>
   );
 }
@@ -147,33 +180,35 @@ function HealthPanel({ health }: { health: Health }) {
       <div className="grid2">
         <div>
           <h3>Subledger tie-outs</h3>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th className="num">GL</th>
-                <th className="num">Subledger</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {health.tie_outs.map((t) => (
-                <tr key={t.name}>
-                  <td>
-                    {t.name}
-                    <div className="muted">{t.subledger}</div>
-                  </td>
-                  <td className="num">
-                    <FlashMoney id={`tie:${t.name}:gl`} cents={t.gl_cents} trace={`account/${t.name.match(/\((\d{4})\)/)?.[1] ?? ""}`} />
-                  </td>
-                  <td className="num">
-                    <FlashMoney id={`tie:${t.name}:sub`} cents={t.subledger_cents} />
-                  </td>
-                  <td className={t.ok ? "ok" : "bad"}>{t.ok ? "✓ ties" : "✗"}</td>
+          <div className="table-fit">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th className="num">GL</th>
+                  <th className="num">Subledger</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {health.tie_outs.map((t) => (
+                  <tr key={t.name}>
+                    <td>
+                      {t.name}
+                      <div className="muted">{t.subledger}</div>
+                    </td>
+                    <td className="num">
+                      <FlashMoney id={`tie:${t.name}:gl`} cents={t.gl_cents} trace={`account/${t.name.match(/\((\d{4})\)/)?.[1] ?? ""}`} />
+                    </td>
+                    <td className="num">
+                      <FlashMoney id={`tie:${t.name}:sub`} cents={t.subledger_cents} />
+                    </td>
+                    <td className={t.ok ? "ok" : "bad"}>{t.ok ? "✓ ties" : "✗"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <h3>Periods</h3>
           <div className="periods">
             {health.periods.map((p) => (
@@ -187,51 +222,53 @@ function HealthPanel({ health }: { health: Health }) {
           <h3>
             Trial balance <span className="muted">as of <When ts={health.clock} /></span>
           </h3>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th className="num">Debit</th>
-                <th className="num">Credit</th>
-                <th className="num" title={before ? `since ${pt(baseline!.clock)}` : ""}>
-                  {before ? `Moved since ${pt(baseline!.clock).split(",")[0]}` : "Moved"}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {tb.accounts.map((a) => {
-                const delta = before ? a.balance_cents - (before[a.account] ?? 0) : 0;
-                return (
-                  <tr key={a.account} className={delta ? "changed" : ""}>
-                    <td>
-                      <span className="mono">{a.account}</span> {a.name}
-                    </td>
-                    <td className="num">
-                      <FlashMoney id={`tb:${a.account}:dr`} cents={Math.max(a.balance_cents, 0)} trace={`account/${a.account}`} blankZero />
-                    </td>
-                    <td className="num">
-                      <FlashMoney id={`tb:${a.account}:cr`} cents={Math.max(-a.balance_cents, 0)} trace={`account/${a.account}`} blankZero />
-                    </td>
-                    <td className="num delta">{delta ? `${delta > 0 ? "Dr" : "Cr"} ${usd(Math.abs(delta))}` : ""}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td>Total</td>
-                <td className="num">
-                  <FlashMoney id="tb:debits" cents={tb.debits_cents} />
-                </td>
-                <td className="num">
-                  <FlashMoney id="tb:credits" cents={tb.credits_cents} />
-                </td>
-                <td className={tb.debits_cents === tb.credits_cents ? "ok" : "bad"}>
-                  {tb.debits_cents === tb.credits_cents ? "✓ balanced" : "✗"}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+          <div className="table-fit">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th className="num">Debit</th>
+                  <th className="num">Credit</th>
+                  <th className="num" title={before ? `since ${pt(baseline!.clock)}` : ""}>
+                    {before ? `Moved since ${pt(baseline!.clock).split(",")[0]}` : "Moved"}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {tb.accounts.map((a) => {
+                  const delta = before ? a.balance_cents - (before[a.account] ?? 0) : 0;
+                  return (
+                    <tr key={a.account} className={delta ? "changed" : ""}>
+                      <td>
+                        <span className="mono">{a.account}</span> {a.name}
+                      </td>
+                      <td className="num">
+                        <FlashMoney id={`tb:${a.account}:dr`} cents={Math.max(a.balance_cents, 0)} trace={`account/${a.account}`} blankZero />
+                      </td>
+                      <td className="num">
+                        <FlashMoney id={`tb:${a.account}:cr`} cents={Math.max(-a.balance_cents, 0)} trace={`account/${a.account}`} blankZero />
+                      </td>
+                      <td className="num delta">{delta ? `${delta > 0 ? "Dr" : "Cr"} ${usd(Math.abs(delta))}` : ""}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Total</td>
+                  <td className="num">
+                    <FlashMoney id="tb:debits" cents={tb.debits_cents} />
+                  </td>
+                  <td className="num">
+                    <FlashMoney id="tb:credits" cents={tb.credits_cents} />
+                  </td>
+                  <td className={tb.debits_cents === tb.credits_cents ? "ok" : "bad"}>
+                    {tb.debits_cents === tb.credits_cents ? "✓ balanced" : "✗"}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
       </div>
     </div>
