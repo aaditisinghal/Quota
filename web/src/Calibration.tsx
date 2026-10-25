@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { api, type Calibration, type Message, type Principal } from "./api";
 import { Money, Reply, Rich, When, personName, sourceName } from "./format";
-import { ConfidenceBadge, Drawer, Factors, Unavailable, pct, useApi } from "./ui";
+import { ConfidenceBadge, Drawer, ErrorState, Factors, Skeleton, Unavailable, pct, useApi } from "./ui";
 import "./calibration.css";
 
 // D5: how Quota settled one commission line. What every source says, the written rule that settled each
@@ -103,16 +103,47 @@ export function CalibrationDrawer({ line, title, back, people, version, onChange
         {cal.missing ? (
           <Unavailable what="The calibration panel" path={`/api/lines/${line}/calibration`} />
         ) : cal.error ? (
-          <p className="error">{cal.error}</p>
+          <ErrorState what={`how Quota settled ${line}`} message={cal.error} />
         ) : !cal.data ? (
-          <p className="muted">Loading how Quota settled {line}…</p>
+          <>
+            <section className="calib-sec">
+              <Skeleton label={`Loading how Quota settled ${line}…`} rows={4} table />
+            </section>
+            <section className="calib-sec">
+              <Skeleton label="Loading the outcome…" rows={2} />
+            </section>
+          </>
         ) : (
-          <Panel c={cal.data} line={line} people={people} onAnswered={answered} />
+          <div className="calib fade-in" key="loaded">
+            <Panel c={cal.data} line={line} people={people} onAnswered={answered} />
+          </div>
         )}
         {rep && <Thread line={line} rep={rep} customer={customer} people={people} messages={msgs.data} missing={msgs.missing} error={msgs.error} />}
       </div>
     </Drawer>
   );
+}
+
+/** Agrees or not, as a glyph and a word in a pill; colour only repeats what the words say. */
+function Agreement({ agrees, label }: { agrees?: boolean | null; label?: string | null }) {
+  if (agrees === true) {
+    return (
+      <span className="pill agrees">
+        <span className="pill-glyph" aria-hidden="true">✓</span>
+        agrees
+      </span>
+    );
+  }
+  if (agrees === false) {
+    return (
+      <span className="pill disagrees">
+        <span className="pill-glyph" aria-hidden="true">≠</span>
+        disagrees
+      </span>
+    );
+  }
+  // "—": context only, nothing to agree with
+  return label && label !== "—" ? <span className="pill unsure">{label}</span> : <span className="muted" title="Context only: not compared">—</span>;
 }
 
 function Panel({ c, line, people, onAnswered }: { c: Calibration; line: string; people: Principal[]; onAnswered: () => void }) {
@@ -127,11 +158,12 @@ function Panel({ c, line, people, onAnswered }: { c: Calibration; line: string; 
         {c.evidence.length === 0 ? (
           <p className="muted">No source evidence on this line.</p>
         ) : (
+          <div className="calib-evidence-wrap">
           <table className="table calib-evidence">
             <tbody>
               {c.evidence.map((e, i) => (
-                <tr key={`${e.source}-${e.field ?? ""}-${i}`}>
-                  <td className="calib-src">
+                <tr key={`${e.source}-${e.field ?? ""}-${i}`} className={e.agrees === false ? "disagrees" : ""}>
+                  <td className="calib-src" title={e.ref ?? undefined}>
                     {sourceLabel(e.source)}
                     {e.field && (
                       <div className="muted">
@@ -142,14 +174,15 @@ function Panel({ c, line, people, onAnswered }: { c: Calibration; line: string; 
                   <td>
                     <Value v={e.value} field={e.field} trace={line} />
                   </td>
-                  <td className={`calib-agree ${e.agrees === true ? "yes" : e.agrees === false ? "no" : "none"}`}>
-                    {e.agrees === true ? "✓ agrees" : e.agrees === false ? "! disagrees" : (e.label ?? "—")}
+                  <td className="calib-agree">
+                    <Agreement agrees={e.agrees} label={e.label} />
                   </td>
                   <td className="mono muted calib-ref">{e.ref}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 
@@ -280,7 +313,7 @@ function Outcome({ c, line, people, onAnswered }: { c: Calibration; line: string
               <button className="primary" disabled={busy} onClick={() => answer("approve")}>
                 Approve
               </button>
-              <button disabled={busy} onClick={() => answer("reject")}>
+              <button className="danger" disabled={busy} onClick={() => answer("reject")}>
                 Reject
               </button>
               <button disabled={busy || !text.trim()} onClick={() => answer("reply")}>

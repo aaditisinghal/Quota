@@ -1,25 +1,51 @@
-import { useEffect } from "react";
+import { useEffect, type MouseEvent } from "react";
 import { api, type Band, type ContractCard, type ContractChild, type OpenDeal, type Principal, type Recipient, type RepDetail } from "./api";
 import { CalibrationDrawer } from "./Calibration";
 import { Money, When, personName, pt, usd } from "./format";
-import { ConfidenceBadge, Simulated, Unavailable, pct, useApi } from "./ui";
+import { ConfidenceBadge, EmptyState, ErrorState, Simulated, Skeleton, Unavailable, pct, useApi } from "./ui";
 
 // D3 + D4: every rep at a glance, in the server's needs-attention order, then one rep's open pipeline and
 // booked contracts, with everyone else paid on each contract one click away.
 
 const band = (status: string): Band => (status.toLowerCase() === "held" ? "held" : status.toLowerCase() === "note" ? "note" : "cleared");
 
+const STATUS_GLYPH: Record<Band, string> = { held: "!", note: "·", cleared: "✓" };
+
+/** A click anywhere on a row opens the rep, unless it landed on a link or control of its own. */
+function openRow(e: MouseEvent<HTMLTableRowElement>, href: string) {
+  if ((e.target as HTMLElement).closest("a, button, input, textarea, select, summary")) return;
+  if (window.getSelection()?.toString()) return; // selecting a figure to copy is not a click
+  if (e.metaKey || e.ctrlKey) {
+    window.open(href, "_blank", "noopener");
+    return;
+  }
+  window.location.hash = href.slice(1);
+}
+
 export function RepsBoard({ version }: { version: number }) {
   const reps = useApi(() => api.reps(), [version]);
   if (reps.missing) return <Unavailable what="The reps board" path="/api/reps" />;
-  if (!reps.data) return <p className="muted">{reps.error ?? "Loading reps…"}</p>;
+  const heading = (
+    <h2>
+      Reps <span className="muted">needing attention first · open pipeline is <Simulated /></span>
+    </h2>
+  );
+  if (!reps.data) {
+    return (
+      <section className="reps">
+        <div className="panel">
+          {heading}
+          {reps.error ? <ErrorState what="the reps board" message={reps.error} /> : <Skeleton label="Loading reps…" rows={4} table />}
+        </div>
+      </section>
+    );
+  }
   const stages = Object.keys(reps.data[0]?.pipeline.by_stage ?? {});
   return (
     <section className="reps">
-      <div className="panel">
-        <h2>
-          Reps <span className="muted">needing attention first · open pipeline is <Simulated /></span>
-        </h2>
+      <div className="panel fade-in">
+        {heading}
+        {reps.data.length === 0 && <EmptyState>No reps on this plan yet.</EmptyState>}
         <div className="table-wrap">
           <table className="table reps-table">
             <thead>
@@ -35,7 +61,8 @@ export function RepsBoard({ version }: { version: number }) {
             </thead>
             <tbody>
               {reps.data.map((r) => (
-                <tr key={r.rep} className={band(r.status) === "held" ? "human-row" : ""}>
+                <tr key={r.rep} className={band(r.status) === "held" ? "human-row" : ""}
+                    onClick={(e) => openRow(e, `#rep/${encodeURIComponent(r.rep)}`)}>
                   <td>
                     <a href={`#rep/${encodeURIComponent(r.rep)}`}>
                       <strong>{r.name}</strong>
@@ -68,7 +95,12 @@ export function RepsBoard({ version }: { version: number }) {
                     <ConfidenceBadge score={r.lowest_confidence} band={band(r.status)} />
                   </td>
                   <td>
-                    <span className={`status status-${band(r.status)}`}>{r.status}</span>
+                    <span className={`status status-${band(r.status)}`}>
+                      <span className="status-glyph" aria-hidden="true">
+                        {STATUS_GLYPH[band(r.status)]}
+                      </span>
+                      {r.status}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -90,15 +122,34 @@ export function RepView({ rep, contract, calibrate, people, version, onChange }:
   }, [contract, detail.data]);
 
   if (detail.missing) return <Unavailable what="Rep detail" path={`/api/reps/${rep}`} />;
-  if (!detail.data) return <p className="muted">{detail.error ?? `Loading ${rep}…`}</p>;
+  if (!detail.data) {
+    return (
+      <section className="rep" key="loading">
+        <div className="case-head">
+          <a href="#reps" className="muted back-link">
+            ← Reps
+          </a>
+          <h2>{personName(rep, people)}</h2>
+        </div>
+        <div className="panel">
+          {detail.error ? <ErrorState what={personName(rep, people)} message={detail.error} /> : <Skeleton label={`Loading ${rep}…`} rows={3} />}
+        </div>
+        {!detail.error && (
+          <div className="panel">
+            <Skeleton label="Loading contracts…" rows={4} />
+          </div>
+        )}
+      </section>
+    );
+  }
   const d = detail.data;
   const open = contract ? d.contracts.find((c) => c.id === contract) : undefined;
   const mine = open ? viewerRecipient(open, rep) : undefined;
 
   return (
-    <section className="rep">
+    <section className="rep" key="loaded">
       <div className="case-head">
-        <a href="#reps" className="muted">
+        <a href="#reps" className="muted back-link">
           ← Reps
         </a>
         <h2>{d.name ?? personName(rep, people)}</h2>
@@ -123,6 +174,7 @@ export function RepView({ rep, contract, calibrate, people, version, onChange }:
                 {deals.map((p) => (
                   <PipelineCard key={p.id} deal={p} />
                 ))}
+                {deals.length === 0 && <span className="lane-empty">No deals</span>}
               </div>
             );
           })}
@@ -141,7 +193,7 @@ export function RepView({ rep, contract, calibrate, people, version, onChange }:
             ))}
           </div>
         ))}
-        {d.contracts.length === 0 && <p className="muted">No booked contracts.</p>}
+        {d.contracts.length === 0 && <EmptyState>No booked contracts yet.</EmptyState>}
       </div>
       {calibrate && open && mine?.line && (
         <CalibrationDrawer line={mine.line} title={`${open.customer} · ${personName(rep, people)}`} back={`rep/${rep}/${open.id}`}

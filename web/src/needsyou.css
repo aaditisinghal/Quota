@@ -1,0 +1,205 @@
+/* Needs you (D5): the inbox on Home. Open items wear the one accent (they need a person); an answered item stays
+   in place for the session, bright green when approved, muted red when rejected, blue when a reply went out.
+   This file loads before styles.css, so every selector that meets a shared class is compound. Light mode only. */
+
+.nyx {
+  --ny-ok: #1a7f37;
+  --ny-ok-bg: #e9f8ee;
+  --ny-ok-line: #34c759;
+  --ny-bad: #b42318;
+  --ny-bad-bg: #fdf3f2;
+  --ny-bad-line: #eab1ab;
+  --ny-info: #1f5fbf;
+  --ny-info-bg: #eef4fd;
+  --ny-info-line: #a9c4ef;
+  --ny-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- panel header ---- */
+.nyx .nyx-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.nyx .nyx-header h3 { margin: 0; display: flex; align-items: baseline; gap: 8px; }
+.nyx .nyx-count {
+  display: inline-block; min-width: 20px; padding: 0 7px; border-radius: 999px; font-size: 12px; line-height: 20px;
+  text-align: center; letter-spacing: 0; color: var(--ink-2); background: var(--line-2); font-weight: 600;
+}
+.nyx.human-panel .nyx-count { color: #fff; background: var(--accent); }
+.nyx .nyx-progress { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.nyx .nyx-bar { width: 64px; height: 4px; border-radius: 999px; background: var(--line-2); overflow: hidden; }
+.nyx .nyx-bar > span { display: block; height: 100%; background: var(--ny-ok-line); border-radius: inherit; transition: width 300ms var(--ny-ease); }
+.nyx .nyx-sub { margin: 0 0 10px; font-size: 12.5px; color: var(--ink-2); }
+
+/* ---- empty state ---- */
+.nyx .nyx-clear {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin-top: 8px; border-radius: 8px;
+  background: var(--ny-ok-bg); border: 1px solid var(--ny-ok-line); color: var(--ny-ok); font-weight: 600;
+}
+.nyx .nyx-clear .nyx-mark { background: var(--ny-ok-line); }
+.nyx.nyx-done { border-color: var(--ny-ok-line); }
+
+/* ---- person groups ---- */
+.nyx .nyx-person { margin-top: 14px; }
+.nyx .nyx-person-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px; font-size: 13.5px; }
+.nyx .nyx-person-head .who-name { font-weight: 600; }
+.nyx .nyx-person-head .nyx-person-left { margin-left: auto; font-size: 12px; color: var(--ink-2); }
+
+/* ---- card ---- */
+.card.nyx-card {
+  position: relative; margin-bottom: 10px; padding: 12px 14px; border: 1px solid var(--accent-line); background: var(--accent-bg);
+  border-left-width: 3px; border-left-color: var(--accent);
+  transition: background-color 300ms var(--ny-ease), border-color 300ms var(--ny-ease), box-shadow 300ms var(--ny-ease);
+}
+.card.nyx-card.is-refused { border-color: var(--ny-bad-line); border-left-color: var(--ny-bad); }
+.card.nyx-card.is-approved {
+  background: var(--ny-ok-bg); border: 2px solid var(--ny-ok-line); border-left-width: 3px; padding: 11px 13px 11px 14px;
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.16);
+}
+.card.nyx-card.is-rejected { background: var(--ny-bad-bg); border-color: var(--ny-bad-line); border-left-color: var(--ny-bad); }
+.card.nyx-card.is-replied { background: var(--ny-info-bg); border-color: var(--ny-info-line); border-left-color: var(--ny-info); }
+
+.nyx-card .nyx-head { display: flex; align-items: flex-start; gap: 12px; }
+.nyx-card .nyx-head-main { min-width: 0; flex: 1; }
+.nyx-card .nyx-eyebrow { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 11.5px; line-height: 1.3; }
+.nyx-card .nyx-kind { text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; color: var(--accent); }
+.nyx-card.is-approved .nyx-kind { color: var(--ny-ok); }
+.nyx-card.is-rejected .nyx-kind { color: var(--ny-bad); }
+.nyx-card.is-replied .nyx-kind { color: var(--ny-info); }
+.nyx-card .nyx-eyebrow a.ref { font-size: 11.5px; }
+.nyx-card .nyx-title { margin-top: 3px; font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--ink); overflow-wrap: anywhere; }
+.nyx-card .nyx-title a.nyx-deal { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--ink-3); }
+.nyx-card .nyx-title a.nyx-deal:hover { background: var(--line-2); }
+.nyx-card .nyx-ask { font-weight: 500; color: var(--ink); }
+.nyx-card .nyx-amount { text-align: right; white-space: nowrap; line-height: 1.15; }
+.nyx-card .nyx-amount .money { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.nyx-card .nyx-amount a.money { border-bottom-width: 2px; }
+.nyx-card .nyx-amount-label { display: block; margin-top: 2px; font-size: 11px; color: var(--ink-2); }
+.nyx-card.is-approved .nyx-amount .money { color: var(--ny-ok); }
+.nyx-card.is-rejected .nyx-amount .money { color: var(--ink-2); }
+
+/* the seat's question */
+.nyx-card .nyx-question { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+.nyx-card .nyx-question.clamped {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.nyx-card button.nyx-link {
+  border: 0; background: none; padding: 0; font: inherit; font-size: 12.5px; color: var(--ink-2); text-decoration: underline;
+  text-underline-offset: 2px; cursor: pointer;
+}
+.nyx-card button.nyx-link:hover:not(:disabled) { color: var(--ink); }
+.nyx-card .nyx-more { margin-top: 2px; }
+
+/* why / how folds */
+.nyx-card .nyx-folds { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.nyx-card button.nyx-fold {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 12px;
+  color: var(--ink-2); background: rgba(255, 255, 255, 0.7); border: 1px solid var(--line);
+}
+.nyx-card button.nyx-fold:hover:not(:disabled) { border-color: var(--ink-3); color: var(--ink); }
+.nyx-card button.nyx-fold[aria-expanded="true"] { color: var(--ink); border-color: var(--ink-3); background: var(--panel); }
+.nyx-card .nyx-caret { display: inline-block; font-size: 9px; transition: transform 160ms var(--ny-ease); }
+.nyx-card button.nyx-fold[aria-expanded="true"] .nyx-caret { transform: rotate(90deg); }
+.nyx-card .nyx-fold-n { font-size: 11px; color: var(--ink-3); }
+.nyx-card .nyx-fold-n.bad { color: var(--ny-bad); }
+.nyx-card .nyx-pane {
+  margin-top: 8px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font-size: 12.5px;
+  animation: nyx-in 200ms var(--ny-ease);
+}
+.nyx-card .nyx-pane-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); margin-bottom: 4px; font-weight: 600; }
+.nyx-card .nyx-why { list-style: none; margin: 0; padding: 0; color: var(--ink-2); }
+.nyx-card .nyx-why li { margin: 0; padding: 2px 0; overflow-wrap: anywhere; }
+.nyx-card .nyx-why li + li { border-top: 1px solid var(--line-2); padding-top: 6px; margin-top: 4px; }
+.nyx-card .nyx-why .details summary { font-size: 11.5px; }
+
+/* the chain: a small vertical timeline */
+.nyx-card .nyx-chain { list-style: none; margin: 0; padding: 0; }
+.nyx-card .nyx-chain li { position: relative; padding: 0 0 8px 18px; overflow-wrap: anywhere; color: var(--ink-2); }
+.nyx-card .nyx-chain li:last-child { padding-bottom: 0; }
+.nyx-card .nyx-chain li::before {
+  content: ""; position: absolute; left: 3px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3);
+}
+.nyx-card .nyx-chain li::after {
+  content: ""; position: absolute; left: 6px; top: 14px; bottom: -2px; width: 1px; background: var(--line);
+}
+.nyx-card .nyx-chain li:last-child::after { display: none; }
+.nyx-card .nyx-chain li.waiting::before { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.nyx-card .nyx-chain li.waiting { color: var(--ink); }
+.nyx-card .nyx-chain li.refused { color: var(--ny-bad); }
+.nyx-card .nyx-chain li.refused::before { content: "🔒"; background: none; width: auto; height: auto; left: 0; top: -1px; font-size: 10px; }
+.nyx-card .nyx-chain time { display: block; font-size: 11px; color: var(--ink-3); }
+
+/* the answer box */
+.nyx-card .nyx-answer { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--accent-line); }
+.nyx-card .nyx-answer label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+.nyx-card .nyx-answer textarea {
+  display: block; width: 100%; height: 36px; min-height: 36px; resize: vertical; font: inherit; font-size: 13px; line-height: 1.4;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; transition: height 160ms var(--ny-ease);
+}
+.nyx-card .nyx-answer textarea:focus, .nyx-card .nyx-answer textarea.has-text { height: 64px; }
+.nyx-card .nyx-answer textarea:focus { outline: 2px solid var(--accent-line); outline-offset: -1px; border-color: var(--accent); }
+.nyx-card .nyx-answer textarea.needs-text { border-color: var(--ny-bad); outline-color: var(--ny-bad-line); }
+.nyx-card .nyx-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.nyx-card .nyx-actions button { padding: 6px 14px; font-weight: 500; border-radius: 6px; transition: background-color 120ms, border-color 120ms; }
+.nyx-card .nyx-actions button.nyx-approve { background: var(--ny-ok); border-color: var(--ny-ok); color: #fff; font-weight: 600; }
+.nyx-card .nyx-actions button.nyx-approve:hover:not(:disabled) { background: #156d2f; border-color: #156d2f; }
+.nyx-card .nyx-actions button.nyx-reject:hover:not(:disabled) { border-color: var(--ny-bad-line); color: var(--ny-bad); }
+.nyx-card .nyx-actions button.nyx-reply.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.nyx-card .nyx-actions button:disabled { opacity: 0.55; cursor: progress; }
+.nyx-card .nyx-kbd { margin-left: auto; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.nyx-card .nyx-kbd kbd {
+  font: 11px var(--sans); padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; background: var(--panel);
+}
+.nyx-card .nyx-hint { margin: 6px 0 0; font-size: 12px; color: var(--ny-bad); }
+
+/* a refusal from the write path */
+.nyx-card .nyx-refusal {
+  margin-top: 10px; padding: 8px 10px; border-radius: 6px; background: var(--ny-bad-bg); border: 1px solid var(--ny-bad-line);
+  color: var(--ny-bad); font-size: 12.5px; animation: nyx-in 200ms var(--ny-ease);
+}
+.nyx-card .nyx-refusal strong { font-weight: 600; }
+.nyx-card .nyx-gone { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; color: var(--ink-2); }
+.nyx-card .nyx-codes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.nyx-card .nyx-code { font: 11px var(--mono); padding: 1px 6px; border-radius: 4px; background: #fff; border: 1px solid var(--ny-bad-line); }
+.nyx-card .nyx-code em { font: 11px var(--sans); font-style: normal; color: var(--ink-2); margin-left: 4px; }
+
+/* ---- resolved state ---- */
+.nyx-card .nyx-resolved { margin-top: 10px; animation: nyx-in 300ms var(--ny-ease); }
+.nyx-card .nyx-verdict { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.nyx-card .nyx-verdict strong { font-weight: 600; }
+.nyx-card.is-approved .nyx-verdict { color: var(--ny-ok); }
+.nyx-card.is-rejected .nyx-verdict { color: var(--ny-bad); }
+.nyx-card.is-replied .nyx-verdict { color: var(--ny-info); }
+.nyx .nyx-mark {
+  flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: #fff;
+  font-size: 13px; font-weight: 700; line-height: 1; animation: nyx-pop 300ms var(--ny-ease);
+}
+.nyx-card.is-approved .nyx-mark { background: var(--ny-ok-line); }
+.nyx-card.is-rejected .nyx-mark { background: var(--ny-bad); }
+.nyx-card.is-replied .nyx-mark { background: var(--ny-info); }
+.nyx-card button.nyx-dismiss { margin-left: auto; }
+.nyx-card .nyx-comment {
+  margin: 8px 0 0; padding: 6px 10px; border-left: 3px solid var(--ink-3); background: rgba(255, 255, 255, 0.75);
+  border-radius: 0 6px 6px 0; font-size: 13px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.nyx-card.is-approved .nyx-comment { border-left-color: var(--ny-ok-line); }
+.nyx-card.is-rejected .nyx-comment { border-left-color: var(--ny-bad-line); }
+.nyx-card.is-replied .nyx-comment { border-left-color: var(--ny-info-line); }
+.nyx-card .nyx-comment cite { display: block; margin-top: 2px; font-size: 11.5px; font-style: normal; color: var(--ink-2); }
+.nyx-card .nyx-result { margin: 8px 0 0; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.nyx-card .nyx-result.raw { font: 11.5px var(--mono); color: var(--ink-2); }
+.nyx-card .nyx-cleared { margin: 6px 0 0; font-size: 12px; color: var(--ink-2); }
+.nyx-card .nyx-asked { margin-top: 8px; }
+.nyx-card .nyx-asked > summary { cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.nyx-card .nyx-asked .nyx-question { margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
+
+@keyframes nyx-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes nyx-pop { 0% { transform: scale(0.4); opacity: 0; } 70% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .card.nyx-card, .nyx .nyx-bar > span, .nyx-card .nyx-caret, .nyx-card .nyx-answer textarea { transition: none; }
+  .nyx-card .nyx-resolved, .nyx-card .nyx-pane, .nyx-card .nyx-refusal, .nyx .nyx-mark { animation: none; }
+}
+
+@media (max-width: 520px) {
+  .nyx-card .nyx-kbd { display: none; }
+  .nyx-card .nyx-amount .money { font-size: 17px; }
+}

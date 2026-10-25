@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { isMissing, type Band, type Confidence } from "./api";
 
 // Small pieces the CFO screens share: a side drawer, the confidence badge and factors, a "simulated" label,
@@ -33,11 +33,49 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[]): { data: T
 
 export function Unavailable({ what, path }: { what: string; path: string }) {
   return (
-    <div className="card unknown">
-      <h3>{what} is not available on this server yet</h3>
-      <p className="muted">
-        The screen reads <code>GET {path}</code>, which this server does not answer.
-      </p>
+    <div className="card unknown state-card" role="status">
+      <span className="state-icon" aria-hidden="true">
+        ?
+      </span>
+      <div>
+        <strong className="state-title">{what} is not available on this server yet</strong>
+        <p className="muted">
+          The screen reads <code>GET {path}</code>, which this server does not answer.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** A call that failed: what it was for, and the server's own words. */
+export function ErrorState({ what, message }: { what: string; message: string }) {
+  return (
+    <div className="state-card is-error" role="alert">
+      <span className="state-icon" aria-hidden="true">
+        !
+      </span>
+      <div>
+        <strong className="state-title">Could not load {what}</strong>
+        <p>{message}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Nothing to show, said plainly, in the same card shape as the other states. */
+export function EmptyState({ children }: { children: ReactNode }) {
+  return <p className="empty-state">{children}</p>;
+}
+
+/** Grey lines in the shape of what is coming, so the screen does not jump when it arrives. */
+export function Skeleton({ label, rows = 4, table, heading = true }: { label: string; rows?: number; table?: boolean; heading?: boolean }) {
+  return (
+    <div className={`skeleton ${table ? "sk-table" : ""}`} role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">{label}</span>
+      {heading && <span className="sk-line sk-head" aria-hidden="true" />}
+      {Array.from({ length: rows }, (_, i) => (
+        <span key={i} className="sk-line" aria-hidden="true" />
+      ))}
     </div>
   );
 }
@@ -97,21 +135,65 @@ export function Factors({ confidence }: { confidence: Confidence }) {
   );
 }
 
-/** A panel that slides in from the right; closing goes back to `back` (the hash without the drawer). */
+const CLOSE_MS = 180;
+const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/** A panel that slides in from the right; closing slides it out, then goes back to `back` (the hash without the drawer). */
 export function Drawer({ title, back, children, wide }: { title: ReactNode; back: string; children: ReactNode; wide?: boolean }) {
+  const [closing, setClosing] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  const titleId = useId();
+  const timer = useRef<number | undefined>(undefined);
+
+  const close = useCallback(() => {
+    if (timer.current !== undefined) return;
+    if (reducedMotion()) {
+      window.location.hash = back;
+      return;
+    }
+    setClosing(true);
+    timer.current = window.setTimeout(() => {
+      timer.current = undefined;
+      window.location.hash = back;
+      setClosing(false); // when the same drawer stays mounted (the hash did not unmount it)
+    }, CLOSE_MS);
+  }, [back]);
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  useEffect(() => {
+    // keyboard users land inside the drawer; focus goes back where it was when it closes
+    const before = document.activeElement as HTMLElement | null;
+    panel.current?.focus({ preventScroll: true });
+    return () => {
+      if (before && document.contains(before)) before.focus({ preventScroll: true });
+    };
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") window.location.hash = back;
+      if (e.key === "Escape") close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [back]);
+  }, [close]);
+
   return (
-    <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && (window.location.hash = back)}>
-      <aside className={`drawer ${wide ? "wide" : ""}`} role="dialog" aria-modal="true">
+    <div className={`drawer-wrap ${closing ? "closing" : ""}`} onMouseDown={(e) => e.target === e.currentTarget && close()}>
+      <aside ref={panel} className={`drawer ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <div className="drawer-head">
-          <h2>{title}</h2>
-          <a className="drawer-close" href={`#${back}`} aria-label="Close">
+          <h2 id={titleId}>{title}</h2>
+          <a
+            className="drawer-close"
+            href={`#${back}`}
+            aria-label="Close"
+            title="Close (Esc)"
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              close();
+            }}
+          >
             ✕
           </a>
         </div>

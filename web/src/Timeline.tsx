@@ -17,10 +17,12 @@ export function Timeline({ items, people, pending }: { items: TimelineItem[]; pe
   return (
     <aside className="timeline" aria-label="Timeline">
       <div className="timeline-head">
-        <h2>Timeline</h2>
-        <div className="chips" role="tablist">
+        <h2>
+          Timeline <span className="tl-count">{shown.length === items.length ? items.length : `${shown.length} of ${items.length}`}</span>
+        </h2>
+        <div className="chips" role="tablist" aria-label="Show">
           {Object.keys(FILTERS).map((f) => (
-            <button key={f} className={`chip ${f === filter ? "on" : ""}`} onClick={() => setFilter(f)}>
+            <button key={f} role="tab" aria-selected={f === filter} className={`chip ${f === filter ? "on" : ""}`} onClick={() => setFilter(f)}>
               {f}
             </button>
           ))}
@@ -30,7 +32,7 @@ export function Timeline({ items, people, pending }: { items: TimelineItem[]; pe
         {shown.map((item) => (
           <TimelineRow key={item.seq} item={item} people={people} human={opens(item, pending)} />
         ))}
-        {shown.length === 0 && <li className="empty">Nothing yet.</li>}
+        {shown.length === 0 && <li className="empty">{items.length === 0 ? "Nothing has happened yet." : `No ${filter.toLowerCase()} yet.`}</li>}
       </ol>
     </aside>
   );

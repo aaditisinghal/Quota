@@ -41,12 +41,15 @@ type Props = {
   onChange: () => void;
   onOpen: (line: string) => void; // the case picker chose another line
   onRep?: (rep: string) => void; // the open line's rep, once its trace has loaded
-  idle?: string | null; // a person the speaker picker followed who has nothing waiting
+  follow?: CaseFollow | null; // why the speaker picker opened this case, or that nothing waits on that person
 };
+
+/** What following a person found: their case line (null when nothing waits on them) and why it was chosen. */
+export type CaseFollow = { person: string; line: string | null; note: string };
 
 const SELECT_STYLE = { border: "1px solid var(--line)", borderRadius: 6, padding: "4px 8px", background: "var(--panel)", font: "inherit", color: "inherit", maxWidth: "100%" };
 
-export function CaseView({ line, items, people, pending, principal, setPrincipal, away, version, onChange, onOpen, onRep, idle }: Props) {
+export function CaseView({ line, items, people, pending, principal, setPrincipal, away, version, onChange, onOpen, onRep, follow }: Props) {
   // The trace is kept with the line it answers, so a newly chosen case never shows under the previous one's title.
   const [loaded, setLoaded] = useState<{ line: string; trace: Trace | null; error: string | null } | null>(null);
 
@@ -70,7 +73,9 @@ export function CaseView({ line, items, people, pending, principal, setPrincipal
   const error = current?.error ?? null;
   const facts = useMemo(() => (trace ? caseFacts(trace, items) : null), [trace, items]);
   const steps = useMemo(() => (trace ? chain(trace, items, people, pending) : []), [trace, items, people, pending]);
-  const lineRep = trace ? String(trace.nodes.find((n) => n.id === trace.root)?.rep ?? "") : "";
+  // The title comes from the line itself, so it names the rep and customer even when there is nothing to compare.
+  const root = trace?.nodes.find((n) => n.id === trace.root && n.kind === "line");
+  const lineRep = root ? String(root.rep ?? "") : "";
   useEffect(() => {
     if (lineRep && onRep) onRep(lineRep);
   }, [lineRep, onRep]);
@@ -91,8 +96,17 @@ export function CaseView({ line, items, people, pending, principal, setPrincipal
     // The list follows the speaker, not every state poll (people is a new array on each one).
   }, [principal, rep, known]);
 
-  const title = facts ? `${accountName(facts.deal)} · ${personName(facts.rep, people)}'s commission` : null;
+  const title = root ? `${accountName(String(root.deal ?? ""))} · ${personName(lineRep, people)}'s commission` : null;
   const unknown = !!error || (!!trace && !facts);
+  // The note only speaks for the person still selected, and only about the case it chose.
+  const note =
+    follow && follow.person === principal
+      ? follow.line === null
+        ? `Nothing is waiting on ${personName(follow.person, people)}; showing ${title ?? line}`
+        : follow.line === line
+          ? follow.note
+          : null
+      : null;
 
   return (
     <section className="case">
@@ -113,11 +127,7 @@ export function CaseView({ line, items, people, pending, principal, setPrincipal
             </option>
           ))}
         </select>
-        {idle && idle === principal && (
-          <span className="muted">
-            Nothing is waiting on {personName(idle, people)}; showing {title ?? line}
-          </span>
-        )}
+        {note && <span className="muted">{note}</span>}
       </div>
       <div className="case-grid">
         {facts ? (
@@ -154,7 +164,21 @@ function isRep(id: string, people: Principal[]): boolean {
   return people.find((p) => p.id === id)?.capabilities.includes("dispute:own_lines") ?? false;
 }
 
-type CaseLine = { line: string; rep: string; customer: string; status: string; at: string; confidence: number | null; amendment: boolean };
+type CaseLine = {
+  line: string;
+  rep: string;
+  customer: string;
+  status: string;
+  amount: number | null;
+  at: string;
+  confidence: number | null;
+  amendment: boolean;
+};
+
+const GONE = new Set(["superseded", "clawed_back", "voided", "void"]);
+/** A line that still pays: not replaced, recovered or voided, and not itself a negative correction. */
+const live = (l: { status: string; amount_cents?: number | null; amount?: number | null }) =>
+  !GONE.has(l.status) && (l.amount_cents ?? l.amount ?? 0) >= 0;
 
 /** Every commission line on these contracts and their amendments, with the server's confidence for its recipient. */
 function contractLines(contracts: ContractCard[]): CaseLine[] {
@@ -166,18 +190,19 @@ function contractLines(contracts: ContractCard[]): CaseLine[] {
     out.push(l);
   };
   for (const c of contracts) {
-    const score = (line: string, recipients: Recipient[] | undefined) =>
-      recipients?.find((r) => r.line === line)?.confidence?.score ?? null;
+    // The confidence the server gave this line's recipient (recipients[] where who is the line's rep).
+    const score = (line: string, rep: string, recipients: Recipient[] | undefined) =>
+      recipients?.find((r) => r.line === line && (!rep || r.who === rep))?.confidence?.score ?? null;
     for (const l of c.lines) {
-      add({ line: l.id, rep: l.rep, customer: c.customer, status: l.status, at: c.countersigned_at ?? "",
-            confidence: score(l.id, c.recipients), amendment: false });
+      add({ line: l.id, rep: l.rep, customer: c.customer, status: l.status, amount: l.amount_cents, at: c.countersigned_at ?? "",
+            confidence: score(l.id, l.rep, c.recipients), amendment: false });
     }
     for (const child of c.children ?? []) {
       for (const inc of child.incremental_lines ?? []) {
         const id = typeof inc === "string" ? inc : inc.id;
         const who = child.recipients?.find((r) => r.line === id)?.who ?? "";
-        add({ line: id, rep: who, customer: c.customer, status: "", at: child.signed_at ?? "",
-              confidence: score(id, child.recipients), amendment: true });
+        add({ line: id, rep: who, customer: c.customer, status: "", amount: typeof inc === "string" ? null : inc.amount_cents,
+              at: child.signed_at ?? "", confidence: score(id, who, child.recipients), amendment: true });
       }
     }
   }
@@ -186,58 +211,96 @@ function contractLines(contracts: ContractCard[]): CaseLine[] {
 
 type CaseOption = { line: string; label: string };
 
-/** The case picker's choices: "Customer · rep · line id". */
+/** The case picker's choices, "Customer · rep · line id": a rep's own lines, or every rep's lines for anyone else. */
 async function caseOptions(person: string, people: Principal[]): Promise<CaseOption[]> {
-  const details = isRep(person, people)
+  const rep = isRep(person, people);
+  const details = rep
     ? [await api.rep(person)]
     : await Promise.all((await api.reps()).map((r) => api.rep(r.rep).catch(() => null)));
-  const lines = contractLines(details.flatMap((d) => d?.contracts ?? []));
+  const lines = contractLines(details.flatMap((d) => d?.contracts ?? [])).filter((l) => !rep || l.rep === person);
   return lines.map((l) => ({
     line: l.line,
     label: `${l.customer}${l.amendment ? " amendment" : ""} · ${l.rep ? personName(l.rep, people) : "?"} · ${l.line}${
-      l.status === "superseded" ? " (superseded)" : ""
+      GONE.has(l.status) ? ` (${l.status.replace(/_/g, " ")})` : ""
     }`,
   }));
 }
 
 /**
- * The line a person's case opens on, or null when nothing is waiting on them. A rep's is their least certain line
- * (the lowest confidence score, the most recent on a tie; else their first line). Anyone else's is the line behind
- * the first item in their Needs-you group. Only which line to show is chosen here; every figure stays the server's.
+ * The line a person's case opens on (null when nothing is waiting on them) and a short note saying why. A rep's is
+ * their least certain line (the lowest confidence score, the most recent on a tie; else their first line). Anyone
+ * else's is the line behind the first item in their Needs-you group. Only which line to show is chosen here; every
+ * figure stays the server's.
  */
-export async function caseLineFor(person: string, people: Principal[]): Promise<string | null> {
+export async function caseLineFor(person: string, people: Principal[]): Promise<{ line: string | null; note: string }> {
+  const name = personName(person, people);
   if (isRep(person, people)) {
     const own = contractLines((await api.rep(person)).contracts).filter((l) => l.rep === person);
-    const live = own.filter((l) => l.status !== "superseded");
-    const scored = live.filter((l) => l.confidence !== null);
+    const paying = own.filter(live);
+    const scored = paying.filter((l) => l.confidence !== null);
     scored.sort((a, b) => (a.confidence ?? 0) - (b.confidence ?? 0) || b.at.localeCompare(a.at) || b.line.localeCompare(a.line));
-    return scored[0]?.line ?? live[0]?.line ?? own[0]?.line ?? null;
+    if (scored[0]) return { line: scored[0].line, note: `${name}'s least certain line · confidence ${scored[0].confidence}` };
+    const first = paying[0] ?? own[0];
+    return first ? { line: first.line, note: `${name}'s first line` } : { line: null, note: "" };
   }
+  // An approver opens the least certain of the items waiting on them (Priya: Summit at 40 before Acme at 80),
+  // so switching to them always shows what most needs their judgement; ties go to the newest item.
   const group = (await api.needsYou()).people.find((g) => g.person === person);
-  for (const item of group?.items ?? []) {
-    const deal = item.deals?.[0];
-    if (!deal) continue;
-    const card = await api.contract(deal);
-    const line = card.lines.find((l) => l.status !== "superseded") ?? card.lines[0];
-    if (line) return line.id;
+  const candidates: { line: string; score: number; order: number; note: string }[] = [];
+  for (const [order, item] of (group?.items ?? []).entries()) {
+    for (const deal of item.deals ?? []) {
+      const card = await api.contract(deal).catch(() => null); // a deal with no contract card yet: try the next one
+      const line = card?.lines.find(live) ?? card?.lines[0];
+      if (!line) continue;
+      const score = card?.recipients.find((r) => r.line === line.id)?.confidence?.score ?? 100;
+      const what = item.kind.replace(/_/g, " ");
+      candidates.push({ line: line.id, score, order,
+                        note: `Waiting on ${name}: ${item.id} ${what}${item.impact_cents ? ` · ${usd(item.impact_cents)}` : ""} · confidence ${score}` });
+      break;
+    }
   }
-  return null;
+  candidates.sort((a, b) => a.score - b.score || b.order - a.order);
+  return candidates[0] ? { line: candidates[0].line, note: candidates[0].note } : { line: null, note: "" };
 }
+
+/** One source record shown as evidence: the one used, the one it outranked, or one read alongside them. */
+type SourceRecord = { node: TraceNode; field: string; role: "used" | "outranked" | "read"; note: string };
 
 type Facts = {
   deal: string;
   rep: string;
-  field: string;
+  field: string | null; // what the deciding rule resolved, or null when no rule had to choose
   original: TraceNode;
   current: TraceNode;
-  chosen: { node: TraceNode; field: string } | null;
-  outranked: { node: TraceNode; field: string; effect: number } | null;
+  records: SourceRecord[];
   rule: string;
   ruleText: string | null;
   claimed: number | null;
   disputed: boolean;
   conceded: boolean;
 };
+
+type Disagreement = { source: string; basis: string; effect_cents: number | null };
+
+// The field each source holds for a resolved question, for a record the trace did not highlight.
+const COUNTERPART: Record<string, Record<string, string>> = {
+  booking_date: { deals: "crm_close_date", contracts: "countersigned_at" },
+  base: { deals: "crm_amount_cents", contracts: "acv_cents" },
+  splits: { deals: "owner_id", contracts: "acv_cents" },
+};
+
+function counterpartField(node: TraceNode, field: string | null): string {
+  const table = String(node.table ?? "");
+  return COUNTERPART[field ?? ""]?.[table] ?? COUNTERPART.base[table] ?? "";
+}
+
+/** The newest version of this deal's record in one source table, among the nodes the trace read. */
+function latestRecord(trace: Trace, table: string, deal: string): TraceNode | undefined {
+  const version = (n: TraceNode) => Number(String(n.id).match(/:v(\d+)$/)?.[1] ?? 0);
+  return trace.nodes
+    .filter((n) => n.table === table && String(n.id).startsWith(`${table}:${deal}:`))
+    .sort((a, b) => version(b) - version(a))[0];
+}
 
 function caseFacts(trace: Trace, items: TimelineItem[]): Facts | null {
   const nodes = new Map(trace.nodes.map((n) => [n.id, n]));
@@ -255,18 +318,66 @@ function caseFacts(trace: Trace, items: TimelineItem[]): Facts | null {
   const disputes = items.filter((i) => i.kind === "DECISION" && i.text.includes(` dispute ${original.id}:`));
   const asserted = disputes.map((i) => i.text.match(/\((\w+) asserted /)?.[1]).find(Boolean);
   const resolutions = trace.nodes.filter((n) => n.kind === "resolution");
-  const effect = (n: TraceNode) =>
-    Math.max(0, ...((n.disagreements as { effect_cents: number | null }[]) ?? []).map((d) => Math.abs(d.effect_cents ?? 0)));
+  const alternativesOf = (n: TraceNode) => (n.disagreements as Disagreement[] | undefined) ?? [];
+  const chosenOf = (n: TraceNode) => trace.edges.find((e) => e.from === n.id && e.label === "chosen")?.to;
+  const effect = (n: TraceNode) => Math.max(0, ...alternativesOf(n).map((d) => Math.abs(d.effect_cents ?? 0)));
+  // The disputed field; else the one where the sources disagree by the most money; else one where another record
+  // disagrees at all (a line nobody disputed still shows CRM against contract); else the first the rule resolved.
   const resolution =
-    resolutions.find((n) => n.field === asserted) ?? resolutions.slice().sort((a, b) => effect(b) - effect(a))[0];
-  if (!resolution) return null;
-  const field = String(resolution.field);
-  const used = trace.edges.find((e) => e.from === resolution.id && e.label === "chosen");
-  const alternatives = (resolution.disagreements as { source: string; basis: string; effect_cents: number | null }[]) ?? [];
-  const biggest = alternatives.slice().sort((a, b) => Math.abs(b.effect_cents ?? 0) - Math.abs(a.effect_cents ?? 0))[0];
-  const chosenNode = used ? nodes.get(used.to) : undefined;
+    resolutions.find((n) => n.field === asserted) ??
+    resolutions.filter((n) => effect(n) > 0).sort((a, b) => effect(b) - effect(a))[0] ??
+    resolutions.find((n) => alternativesOf(n).some((d) => d.source !== chosenOf(n))) ??
+    resolutions[0];
+  const field = resolution ? String(resolution.field) : null;
+  const chosenId = resolution ? chosenOf(resolution) : undefined;
+  // The alternative that would move the money most; on a tie, a different record from the one used.
+  const biggest = (resolution ? alternativesOf(resolution) : [])
+    .map((d, i) => ({ d, i }))
+    .sort(
+      (a, b) =>
+        Math.abs(b.d.effect_cents ?? 0) - Math.abs(a.d.effect_cents ?? 0) ||
+        Number(a.d.source === chosenId) - Number(b.d.source === chosenId) ||
+        a.i - b.i,
+    )[0]?.d;
+  const chosenNode = chosenId ? nodes.get(chosenId) : undefined;
   const altNode = biggest ? nodes.get(biggest.source) : undefined;
-  const rule = String(resolution.rule ?? "");
+  const rule = String(resolution?.rule ?? "");
+  const deal = String(original.deal ?? "");
+
+  const records: SourceRecord[] = [];
+  if (altNode && biggest) {
+    const e = biggest.effect_cents ?? 0;
+    records.push({
+      node: altNode,
+      field: highlightField(altNode, field ?? "", "alternative") || counterpartField(altNode, field),
+      role: "outranked",
+      note: e ? `Would pay ${usd(Math.abs(e))} ${e > 0 ? "more" : "less"} if it counted` : "Disagrees, but would pay the same if it counted",
+    });
+  }
+  if (chosenNode) {
+    records.push({
+      node: chosenNode,
+      field: highlightField(chosenNode, field ?? "", "chosen") || counterpartField(chosenNode, field),
+      role: "used",
+      note: "Used for the commission",
+    });
+  }
+  // With no disagreement to show, the CRM and contract records still sit side by side (CRM first).
+  if (!altNode) {
+    for (const table of ["deals", "contracts"]) {
+      if (records.some((r) => r.node.table === table)) continue;
+      const node = latestRecord(trace, table, deal);
+      if (!node) continue;
+      const read: SourceRecord = {
+        node,
+        field: counterpartField(node, field),
+        role: "read",
+        note: chosenNode ? "Read for this calculation; it did not outrank the record used" : "Read for this calculation",
+      };
+      if (table === "deals") records.unshift(read);
+      else records.push(read);
+    }
+  }
   // The analyst's reply states the rule in words; use the first one that names it.
   const ruleText =
     items
@@ -275,15 +386,12 @@ function caseFacts(trace: Trace, items: TimelineItem[]): Facts | null {
       .find((l) => l.startsWith(`Rule: ${rule}:`))
       ?.slice(`Rule: ${rule}: `.length) ?? null;
   return {
-    deal: String(original.deal),
-    rep: String(original.rep),
+    deal,
+    rep: String(original.rep ?? ""),
     field,
     original,
     current,
-    chosen: chosenNode ? { node: chosenNode, field: highlightField(chosenNode, field, "chosen") } : null,
-    outranked: altNode && biggest
-      ? { node: altNode, field: highlightField(altNode, field, "alternative"), effect: biggest.effect_cents ?? 0 }
-      : null,
+    records,
     rule,
     ruleText,
     // Only a record that would pay more is what a rep claims; one that would pay less was simply outranked.
@@ -316,22 +424,27 @@ function display(field: string, value: unknown): string {
 }
 
 function Evidence({ facts }: { facts: Facts }) {
+  const used = facts.records.find((r) => r.role === "used");
+  const field = facts.field ?? "";
   return (
     <div className="case-col">
       <h3>Evidence</h3>
-      <div className="rule-banner">
-        <span className="muted">The rule that decides</span>
-        <strong>
-          {facts.rule}
-          {facts.ruleText ? `: ${facts.ruleText}` : `: ${DISPUTED[facts.field] ?? facts.field} comes from the ${facts.chosen ? sourceKind(facts.chosen.node) : "first source"}`}
-        </strong>
-      </div>
+      {facts.rule ? (
+        <div className="rule-banner">
+          <span className="muted">The rule that decides</span>
+          <strong>
+            {facts.rule}
+            {facts.ruleText ? `: ${facts.ruleText}` : `: ${DISPUTED[field] ?? field} comes from the ${used ? sourceKind(used.node) : "first source"}`}
+          </strong>
+        </div>
+      ) : (
+        <p className="muted">No rule had to choose between sources on this line.</p>
+      )}
       <div className="evidence">
-        {facts.outranked && (
-          <SourceCard node={facts.outranked.node} field={facts.outranked.field} role="outranked"
-                      note={`Would pay ${usd(Math.abs(facts.outranked.effect))} ${facts.outranked.effect >= 0 ? "more" : "less"} if it counted`} />
-        )}
-        {facts.chosen && <SourceCard node={facts.chosen.node} field={facts.chosen.field} role="used" note="Used for the commission" />}
+        {facts.records.map((r) => (
+          <SourceCard key={`${r.role}:${r.node.id}`} node={r.node} field={r.field} role={r.role} note={r.note} />
+        ))}
+        {facts.records.length === 0 && <p className="muted">The trace holds no CRM or contract record for this line.</p>}
       </div>
     </div>
   );
@@ -342,7 +455,7 @@ function sourceKind(node: TraceNode): string {
   return table === "deals" ? "CRM" : table === "contracts" ? "signed contract" : table.replace(/_/g, " ");
 }
 
-function SourceCard({ node, field, role, note }: { node: TraceNode; field: string; role: "used" | "outranked"; note: string }) {
+function SourceCard({ node, field, role, note }: { node: TraceNode; field: string; role: SourceRecord["role"]; note: string }) {
   const snippet = (node.snippet as Record<string, unknown>) ?? {};
   const table = String(node.table ?? "");
   const title = table === "deals" ? "CRM opportunity" : table === "contracts" ? "E-signature · signed contract" : table;
@@ -354,13 +467,15 @@ function SourceCard({ node, field, role, note }: { node: TraceNode; field: strin
     <div className={`card source ${role}`}>
       <div className="card-head">
         <strong>{title}</strong>
-        <span className={`tag ${role === "used" ? "tag-used" : ""}`}>{role === "used" ? "used" : "outranked"}</span>
+        <span className={`tag ${role === "used" ? "tag-used" : ""}`}>{role}</span>
         {system && <span className="muted">from {system}</span>}
       </div>
-      <div className="source-key">
-        <span className="muted">{FIELD_NAMES[field] ?? field}</span>
-        <span className="source-value">{display(field, snippet[field])}</span>
-      </div>
+      {field && (
+        <div className="source-key">
+          <span className="muted">{FIELD_NAMES[field] ?? field}</span>
+          <span className="source-value">{display(field, snippet[field])}</span>
+        </div>
+      )}
       <dl>
         {shown.map((k) => (
           <div key={k} className="field">
@@ -463,7 +578,7 @@ function Decision({ facts, steps }: { facts: Facts; steps: Step[] }) {
   );
 }
 
-const KEEP_DECISIONS = /^D-\d+ (commission_calc|dispute|escalation|resubmission_check|integrity_check|authority_check)\b/;
+const KEEP_DECISIONS = /^D-\d+ (commission_calc|dispute|escalation|resubmission_check|integrity_check|authority_check|commitment_check)\b/;
 
 /** The timeline items about this line, in order, as plain-English steps. */
 function chain(trace: Trace, items: TimelineItem[], people: Principal[], pending: Pending[]): Step[] {
@@ -482,7 +597,7 @@ function chain(trace: Trace, items: TimelineItem[], people: Principal[], pending
     const hit =
       item.refs.some((r) => ids.has(r)) ||
       (item.kind === "APPROVAL" && / plan_exception /.test(item.text) && aboutDeal) ||
-      (item.kind === "DECISION" && / authority_check /.test(item.text) && aboutDeal);
+      (item.kind === "DECISION" && / (authority|commitment)_check /.test(item.text) && aboutDeal);
     if (!hit) continue;
     if (item.kind === "DECISION" && !KEEP_DECISIONS.test(item.text)) continue;
     item.refs.filter((r) => /^(A|CL|D|P)-/.test(r)).forEach((r) => ids.add(r));
@@ -523,6 +638,18 @@ function chain(trace: Trace, items: TimelineItem[], people: Principal[], pending
           label: grant ? <>{name(grant[1])} tried to grant it · routed to {name(grant[2])}</> : <>Authority check</>,
           detail: conflict ? `conflict of interest: ${conflict}` : grant?.[3].split(";")[0],
           tone: "refused",
+        };
+      } else if (/ commitment_check /.test(t)) {
+        // A term promised outside the signed contract holds the commission until someone reviews it.
+        const found = t.match(/commitment_check \S+: (\w+): (.*)$/);
+        const held = t.match(/(\$[\d,.]+) held/)?.[1];
+        const what = found ? found[1].toLowerCase().replace(/_/g, " ") : "commitment check";
+        step = {
+          at: item.clock,
+          ids: [head],
+          label: <>{held ? `Quota held ${held}` : "Quota checked"} · {what}</>,
+          detail: found ? found[2].split(";")[0].slice(0, 180) : undefined,
+          codes: found ? [found[1]] : undefined,
         };
       } else if (/ escalation /.test(t)) {
         const to = t.match(/-> ([\w.]+) \(([^)]+)\)/);
@@ -582,7 +709,8 @@ function chain(trace: Trace, items: TimelineItem[], people: Principal[], pending
     if (step) steps.push(step);
   }
 
-  for (const a of pending.filter((p) => ids.has(p.id))) {
+  // An approval waits on this line when it was named in the chain, or is about a decision in it (a review of a hold).
+  for (const a of pending.filter((p) => ids.has(p.id) || ids.has(p.subject))) {
     steps.push({ at: a.since, ids: [a.id], label: <>Waiting on {name(a.approver)}</>, detail: `${usd(a.amount_cents)} to decide`, tone: "human" });
   }
   return steps;

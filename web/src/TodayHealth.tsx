@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FlashMoney, FlashText } from "./Flash";
 import { api, type Health, type Principal, type Today } from "./api";
 import { Money, Rich, TraceLink, When, personName, pt, usd } from "./format";
+import { ErrorState, Skeleton } from "./ui";
 
 // Balances at the previous clock the health screen saw, so a change (an injected churn) shows what moved.
 let seen: { clock: string; balances: Record<string, number> } | null = null;
@@ -10,9 +11,20 @@ let baseline: { clock: string; balances: Record<string, number> } | null = null;
 export function TodayHealth({ version, people }: { version: number; people: Principal[] }) {
   const [today, setToday] = useState<Today | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [todayError, setTodayError] = useState<string | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.today().then(setToday).catch(() => setToday(null));
+    api
+      .today()
+      .then((t) => {
+        setToday(t);
+        setTodayError(null);
+      })
+      .catch((e) => {
+        setToday(null);
+        setTodayError((e as Error).message);
+      });
     api
       .health()
       .then((h) => {
@@ -20,14 +32,32 @@ export function TodayHealth({ version, people }: { version: number; people: Prin
         if (seen && seen.clock !== h.clock) baseline = seen;
         seen = { clock: h.clock, balances };
         setHealth(h);
+        setHealthError(null);
       })
-      .catch(() => setHealth(null));
+      .catch((e) => {
+        setHealth(null);
+        setHealthError((e as Error).message);
+      });
   }, [version]);
 
   return (
     <section className="today-health">
-      {today && <TodayPanel today={today} people={people} />}
-      {health && <HealthPanel health={health} />}
+      {today ? (
+        <TodayPanel today={today} people={people} />
+      ) : (
+        <div className="panel">
+          <h2>Today</h2>
+          {todayError ? <ErrorState what="today" message={todayError} /> : <Skeleton label="Loading today…" rows={4} heading={false} />}
+        </div>
+      )}
+      {health ? (
+        <HealthPanel health={health} />
+      ) : (
+        <div className="panel">
+          <h2>Ledger health</h2>
+          {healthError ? <ErrorState what="ledger health" message={healthError} /> : <Skeleton label="Loading ledger health…" rows={6} table heading={false} />}
+        </div>
+      )}
     </section>
   );
 }
@@ -35,7 +65,7 @@ export function TodayHealth({ version, people }: { version: number; people: Prin
 function TodayPanel({ today, people }: { today: Today; people: Principal[] }) {
   const waitingTotal = today.waiting.reduce((s, w) => s + w.total_cents, 0);
   return (
-    <div className="panel">
+    <div className="panel fade-in">
       <h2>Today, {pt(today.day)}</h2>
       <div className="grid3">
         <div className={`col ${today.waiting.length ? "human" : ""}`}>
@@ -103,7 +133,7 @@ function HealthPanel({ health }: { health: Health }) {
   const tb = health.trial_balance;
   const before = baseline?.balances ?? null;
   return (
-    <div className="panel">
+    <div className="panel fade-in">
       <h2>Ledger health</h2>
       {health.cascades.map((c) => (
         <div key={c.deal} className="cascade">
@@ -147,6 +177,7 @@ function HealthPanel({ health }: { health: Health }) {
       <div className="grid2">
         <div>
           <h3>Subledger tie-outs</h3>
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
@@ -174,6 +205,7 @@ function HealthPanel({ health }: { health: Health }) {
               ))}
             </tbody>
           </table>
+          </div>
           <h3>Periods</h3>
           <div className="periods">
             {health.periods.map((p) => (
@@ -187,6 +219,7 @@ function HealthPanel({ health }: { health: Health }) {
           <h3>
             Trial balance <span className="muted">as of <When ts={health.clock} /></span>
           </h3>
+          <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
@@ -232,6 +265,7 @@ function HealthPanel({ health }: { health: Health }) {
               </tr>
             </tfoot>
           </table>
+          </div>
         </div>
       </div>
     </div>
