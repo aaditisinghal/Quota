@@ -1,0 +1,6 @@
+# local state and build output
+.local-data/
+**/.local-data/
+node_modules/
+**/generated/
+**/dist/

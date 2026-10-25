@@ -1,0 +1,273 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..c8d1876
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,6 @@
++# local state and build output
++.local-data/
++**/.local-data/
++node_modules/
++**/generated/
++**/dist/
+diff --git a/app/backend/backend-generation-v1/src/seed/generate.mjs b/app/backend/backend-generation-v1/src/seed/generate.mjs
+index 21b738f..a0410c7 100644
+--- a/app/backend/backend-generation-v1/src/seed/generate.mjs
++++ b/app/backend/backend-generation-v1/src/seed/generate.mjs
+@@ -25,6 +25,7 @@ import { seedRecognition } from './recognition.mjs';
+ import { seedBenefits } from './benefits.mjs';
+ import { seedFiles } from './files.mjs';
+ import { seedRewards } from './rewards.mjs';
++import { applyQuotaRoster, loadRoster } from './quota-roster.mjs';
+ 
+ const TODAY = '2026-10-23';
+ export const SEED_PASSWORD = 'bamboohr1!';
+@@ -375,6 +376,7 @@ export function generateWorld({ seed = 42, size = 100 } = {}) {
+   seedSettingsTimePay(push, { employees }); // module: settings-time-pay
+   push('ClockState', { id: 1, now: NOW, tz: 'America/New_York' });
+   T._meta = { demoManagerId: demoManager.id, demoEmployeeId: demoEmployee.id, seed, size };
++  applyQuotaRoster(T, loadRoster()); // CUA_TASKS C1: Quota's cast replaces the generated Sales department
+   return T;
+ }
+ function a1(i) { return 0x20edc229f + i * 7919; }
+diff --git a/app/backend/backend-generation-v1/src/seed/quota-roster.mjs b/app/backend/backend-generation-v1/src/seed/quota-roster.mjs
+new file mode 100644
+index 0000000..ab7874a
+--- /dev/null
++++ b/app/backend/backend-generation-v1/src/seed/quota-roster.mjs
+@@ -0,0 +1,56 @@
++// Quota's company (CUA_TASKS C1): when QUOTA_ROSTER names a roster file, the generated Sales department gives way
++// to Quota's cast. The generated Sales people move to Customer Success (other tables reference them), and the
++// roster's people are added in Sales, Finance, Sales Operations and Partners with the rows HR keeps for them:
++// job info, employment status, compensation, commission and bonus. Pure and deterministic: same roster, same rows.
++import { readFileSync } from 'node:fs';
++import { DEFAULT_NOW } from '../platform/clock.mjs';
++
++const DEPT = { Sales: 18249, Finance: 18259, 'Sales Operations': 18901, Partners: 18902, 'Customer Success': 18253 };
++const STATUS = { 'Full-Time': 18158, Contractor: 18160, Terminated: 18161 };
++const NORTH_AMERICA = 18233, REMOTE = 18352;
++const JERRY_USER = 2385;
++
++export function loadRoster(path = process.env.QUOTA_ROSTER) {
++  return path ? JSON.parse(readFileSync(path, 'utf8')) : null;
++}
++
++export function applyQuotaRoster(T, roster) {
++  if (!roster) return T;
++  // departments Quota needs that the generated company lacks
++  const have = new Set(T.ListValue.filter((l) => l.list === 'department').map((l) => l.label));
++  let sort = Math.max(...T.ListValue.filter((l) => l.list === 'department').map((l) => l.sort)) + 1;
++  for (const label of roster.departments) {
++    if (!have.has(label)) T.ListValue.push({ id: DEPT[label], list: 'department', label, sort: sort++, archived: false, meta: null });
++  }
++  // the generated Sales department moves aside, intact
++  for (const e of T.Employee) if (e.departmentId === DEPT.Sales) e.departmentId = DEPT['Customer Success'];
++  for (const r of T.EmployeeTableRow) if (r.table === 'jobInfo' && r.data?.department === 'Sales') r.data = { ...r.data, department: 'Customer Success' };
++
++  const template = Object.fromEntries(Object.keys(T.Employee[0]).map((k) => [k, null]));
++  let nextId = Math.max(...T.Employee.map((e) => e.id)) + 1;
++  let nextNumber = Math.max(...T.Employee.map((e) => Number(e.employeeNumber) || 0)) + 1;
++  const people = [...roster.people].sort((a, b) => a.key.localeCompare(b.key));
++  const ids = Object.fromEntries(people.map((p) => [p.key, nextId++]));
++  const byKey = Object.fromEntries(people.map((p) => [p.key, p]));
++  const row = (employeeId, table, effectiveDate, data) => T.EmployeeTableRow.push({ employeeId, table, effectiveDate, data, createdBy: JERRY_USER, createdAt: DEFAULT_NOW });
++
++  for (const p of people) {
++    const id = ids[p.key];
++    const boss = p.reportsTo ? byKey[p.reportsTo] : null;
++    const last = p.employmentStatus[p.employmentStatus.length - 1];
++    T.Employee.push({
++      ...template, id, employeeNumber: String(nextNumber++), firstName: p.firstName, lastName: p.lastName, preferredName: p.firstName,
++      workEmail: p.workEmail, state: p.state, country: 'United States', hireDate: p.hireDate,
++      status: p.terminationDate ? 'inactive' : 'active', terminationDate: p.terminationDate,
++      terminationReasonId: p.terminationDate ? 4400 : null, jobTitle: p.jobTitle, departmentId: DEPT[p.department],
++      divisionId: NORTH_AMERICA, locationId: REMOTE, employmentStatusId: STATUS[last.status], reportsToId: boss ? ids[boss.key] : null,
++      payType: p.payType, timezone: 'America/Los_Angeles', hasPhoto: false, customFields: { quotaKey: p.key },
++    });
++    row(id, 'jobInfo', p.hireDate, { jobTitle: p.jobTitle, reportsTo: boss ? `${boss.lastName}, ${boss.firstName}` : null, reportsToId: boss ? ids[boss.key] : null, department: p.department, division: 'North America', location: 'Remote Worker' });
++    for (const s of p.employmentStatus) row(id, 'employmentStatus', s.effectiveDate, { status: s.status, comment: s.comment, fte: 1 });
++    for (const c of p.compensation) row(id, 'compensation', c.effectiveDate, { payRate: c.payRate, payType: c.payType, payPer: c.payPer, paySchedule: c.paySchedule, changeReason: 'Hire', currency: 'USD', comment: null, overtimeStatus: 'Exempt', overtimeRate: null });
++    for (const c of p.commission) row(id, 'commission', c.date, { amount: c.amount_cents / 100, currency: 'USD', comment: c.comment });
++    for (const b of p.bonus) row(id, 'bonus', b.date, { amount: b.amount_cents / 100, currency: 'USD', reason: b.reason, comment: b.comment });
++  }
++  return T;
++}
+diff --git a/app/backend/backend-generation-v1/tests/_harness.mjs b/app/backend/backend-generation-v1/tests/_harness.mjs
+index 221a858..2f6f6ae 100644
+--- a/app/backend/backend-generation-v1/tests/_harness.mjs
++++ b/app/backend/backend-generation-v1/tests/_harness.mjs
+@@ -1,9 +1,12 @@
+ // Shared fuzz harness: boots an isolated clone server (own DB, random port) as a child process and talks HTTP to it.
+ import { rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { fileURLToPath } from 'node:url';
+ export const RAW = /prisma|invocation|\.mjs|\.ts:|node_modules|TypeError|ReferenceError|SyntaxError|RangeError|SQLITE|libsql|\bat [\w.<>]+ \(|Argument `|is missing|undefined|\[object|NaN/i;
+ export async function boot(tag) {
+-  const db = `/tmp/bhr-fuzz-${tag}-${process.pid}.db`; rmSync(db, { force: true }); rmSync(db + '.schema-hash', { force: true });
+-  const proc = Bun.spawn(['bun', new URL('../server.mjs', import.meta.url).pathname], { env: { ...process.env, DATABASE_URL: 'file:' + db, PORT: '0', SIZE: '100' }, stdout: 'pipe', stderr: 'pipe' });
++  const db = join(tmpdir(), `bhr-fuzz-${tag}-${process.pid}.db`).replaceAll('\', '/'); // portable (Windows too) rmSync(db, { force: true }); rmSync(db + '.schema-hash', { force: true });
++  const proc = Bun.spawn(['bun', fileURLToPath(new URL('../server.mjs', import.meta.url))], { env: { ...process.env, DATABASE_URL: 'file:' + db, PORT: '0', SIZE: '100' }, stdout: 'pipe', stderr: 'pipe' });
+   let base = null; const dec = new TextDecoder(); let buf = '';
+   const reader = proc.stdout.getReader();
+   const t0 = Date.now();
+diff --git a/app/backend/backend-generation-v1/tests/quota-roster.test.mjs b/app/backend/backend-generation-v1/tests/quota-roster.test.mjs
+new file mode 100644
+index 0000000..b4cbd18
+--- /dev/null
++++ b/app/backend/backend-generation-v1/tests/quota-roster.test.mjs
+@@ -0,0 +1,36 @@
++import { test, expect } from 'bun:test';
++import { createHash } from 'node:crypto';
++import { generateWorld } from '../src/seed/generate.mjs';
++import { applyQuotaRoster } from '../src/seed/quota-roster.mjs';
++
++const h = (x) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
++const ROSTER = {
++  departments: ['Sales', 'Finance', 'Sales Operations', 'Partners'],
++  people: [
++    { key: 'jordan.kim', firstName: 'Jordan', lastName: 'Kim', workEmail: 'jordan.kim@fernhill.example', jobTitle: 'Account Executive', department: 'Sales', reportsTo: 'morgan.diaz', hireDate: '2024-03-01', state: 'CA', payType: 'Salary', terminationDate: null, employmentStatus: [{ effectiveDate: '2024-03-01', status: 'Full-Time', comment: 'Hire' }], compensation: [{ effectiveDate: '2024-03-01', payRate: 98000, payType: 'Salary', payPer: 'Year', paySchedule: 'Twice a month' }], commission: [{ date: '2026-04-15', amount_cents: 1160000, comment: 'onyx-motors 2026Q1' }], bonus: [] },
++    { key: 'morgan.diaz', firstName: 'Morgan', lastName: 'Diaz', workEmail: 'morgan.diaz@fernhill.example', jobTitle: 'Sales Manager', department: 'Sales', reportsTo: null, hireDate: '2022-09-12', state: 'CA', payType: 'Salary', terminationDate: null, employmentStatus: [{ effectiveDate: '2022-09-12', status: 'Full-Time', comment: 'Hire' }], compensation: [], commission: [], bonus: [] },
++    { key: 'ana.ruiz', firstName: 'Ana', lastName: 'Ruiz (agent)', workEmail: 'ana.ruiz@agents.example', jobTitle: 'Independent Sales Agent', department: 'Partners', reportsTo: null, hireDate: '2025-07-01', state: 'CA', payType: 'Contract', terminationDate: null, employmentStatus: [{ effectiveDate: '2025-07-01', status: 'Contractor', comment: 'Partner agreement' }], compensation: [], commission: [], bonus: [] },
++  ],
++};
++const world = () => applyQuotaRoster(generateWorld({ seed: 42, size: 100 }), structuredClone(ROSTER));
++
++test('the Quota roster is deterministic: same roster, same world', () => {
++  expect(h(world())).toBe(h(world()));
++});
++test('the roster replaces the Sales department and keeps the generated people elsewhere', () => {
++  const T = world();
++  const sales = T.Employee.filter((e) => e.departmentId === 18249);
++  expect(sales.map((e) => `${e.firstName} ${e.lastName}`).sort()).toEqual(['Jordan Kim', 'Morgan Diaz']);
++  expect(T.Employee.length).toBe(103);                                   // nobody generated was removed
++  const jordan = sales.find((e) => e.firstName === 'Jordan');
++  expect(jordan.reportsToId).toBe(sales.find((e) => e.firstName === 'Morgan').id);
++  const rows = T.EmployeeTableRow.filter((r) => r.employeeId === jordan.id);
++  expect(rows.find((r) => r.table === 'commission').data).toEqual({ amount: 11600, currency: 'USD', comment: 'onyx-motors 2026Q1' });
++  expect(rows.find((r) => r.table === 'compensation').data.payRate).toBe(98000);
++  expect(T.ListValue.some((l) => l.list === 'department' && l.label === 'Partners')).toBe(true);
++  const ana = T.Employee.find((e) => e.lastName === 'Ruiz (agent)');
++  expect([ana.departmentId, ana.employmentStatusId]).toEqual([18902, 18160]);
++});
++test('without a roster nothing changes', () => {
++  expect(h(applyQuotaRoster(generateWorld({ seed: 42, size: 100 }), null))).toBe(h(generateWorld({ seed: 42, size: 100 })));
++});
+diff --git a/app/frontend/react-clone/postcss.config.mjs b/app/frontend/react-clone/postcss.config.mjs
+new file mode 100644
+index 0000000..d920ad5
+--- /dev/null
++++ b/app/frontend/react-clone/postcss.config.mjs
+@@ -0,0 +1,2 @@
++// The clone needs no PostCSS plugins. This file stops Vite from picking up a postcss.config from a parent folder.
++export default { plugins: {} };
+diff --git a/scripts/_paths.mjs b/scripts/_paths.mjs
+new file mode 100644
+index 0000000..43bca3a
+--- /dev/null
++++ b/scripts/_paths.mjs
+@@ -0,0 +1,7 @@
++// Shared paths for the run-from-source scripts (they mirror the Dockerfile's steps).
++import { fileURLToPath } from 'node:url';
++import { dirname, resolve } from 'node:path';
++export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
++export const BACKEND = resolve(ROOT, 'app/backend/backend-generation-v1');
++export const FRONTEND = resolve(ROOT, 'app/frontend/react-clone');
++export const DATA = resolve(ROOT, '.local-data');
+diff --git a/scripts/build.mjs b/scripts/build.mjs
+new file mode 100644
+index 0000000..3987278
+--- /dev/null
++++ b/scripts/build.mjs
+@@ -0,0 +1,4 @@
++// bun run build: build the frontend into app/frontend/react-clone/dist (served as STATIC_DIR).
++import { FRONTEND } from './_paths.mjs';
++import { run } from './run.mjs';
++run('bun', ['run', 'build'], FRONTEND);
+diff --git a/scripts/reset.mjs b/scripts/reset.mjs
+new file mode 100644
+index 0000000..3c3586b
+--- /dev/null
++++ b/scripts/reset.mjs
+@@ -0,0 +1,5 @@
++// bun run reset: delete the local database so the next start re-seeds it.
++import { rmSync } from 'node:fs';
++import { DATA } from './_paths.mjs';
++rmSync(DATA, { recursive: true, force: true });
++console.log('removed', DATA);
+diff --git a/scripts/run.mjs b/scripts/run.mjs
+new file mode 100644
+index 0000000..e3842eb
+--- /dev/null
++++ b/scripts/run.mjs
+@@ -0,0 +1,5 @@
++import { spawnSync } from 'node:child_process';
++export function run(cmd, args, cwd, env = {}) {
++  const r = spawnSync(cmd, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32', env: { ...process.env, ...env } });
++  if (r.status !== 0) process.exit(r.status ?? 1);
++}
+diff --git a/scripts/setup.mjs b/scripts/setup.mjs
+new file mode 100644
+index 0000000..fa8df4c
+--- /dev/null
++++ b/scripts/setup.mjs
+@@ -0,0 +1,6 @@
++// bun run setup: install backend and frontend dependencies and generate the Prisma client.
++import { BACKEND, FRONTEND } from './_paths.mjs';
++import { run } from './run.mjs';
++run('bun', ['install', '--frozen-lockfile'], BACKEND);
++run('bun', ['x', 'prisma', 'generate', '--schema', 'prisma/schema.prisma'], BACKEND, { CHECKPOINT_DISABLE: '1' });
++run('bun', ['install', '--frozen-lockfile'], FRONTEND);
+diff --git a/scripts/start.mjs b/scripts/start.mjs
+new file mode 100644
+index 0000000..1334f47
+--- /dev/null
++++ b/scripts/start.mjs
+@@ -0,0 +1,10 @@
++// bun run start: one port serves the SPA and the API. QUOTA_ROSTER (a path from where you run this) seeds Quota's
++// cast; the database lives in .local-data/clone.db (POST /__clone/reset, or delete the file, to re-seed).
++import { mkdirSync } from 'node:fs';
++import { resolve } from 'node:path';
++import { BACKEND, FRONTEND, DATA } from './_paths.mjs';
++import { run } from './run.mjs';
++mkdirSync(DATA, { recursive: true });
++const env = { STATIC_DIR: resolve(FRONTEND, 'dist'), DATABASE_URL: process.env.DATABASE_URL || `file:${resolve(DATA, 'clone.db')}` };
++if (process.env.QUOTA_ROSTER) env.QUOTA_ROSTER = resolve(process.cwd(), process.env.QUOTA_ROSTER);
++run('bun', ['server.mjs'], BACKEND, env);
+diff --git a/scripts/test.mjs b/scripts/test.mjs
+new file mode 100644
+index 0000000..5e9fdaf
+--- /dev/null
++++ b/scripts/test.mjs
+@@ -0,0 +1,4 @@
++// bun run test: the backend's own test suite.
++import { BACKEND } from './_paths.mjs';
++import { run } from './run.mjs';
++run('bun', ['test', 'tests'], BACKEND);
+diff --git a/start-clone.cmd b/start-clone.cmd
+new file mode 100644
+index 0000000..926632f
+--- /dev/null
++++ b/start-clone.cmd
+@@ -0,0 +1,21 @@
++@echo off
++title BambooHR clone (Quota roster) - http://127.0.0.1:8080
++set "ROOT=%~dp0"
++cd /d "%ROOT%app\backend\backend-generation-v1"
++set "QUOTA_ROSTER=C:\Users\aadit\Downloads\Quota\out\hr_roster.json"
++set "CLONE_ADMIN_TOKEN=dev"
++set "PORT=8080"
++set "HOST=127.0.0.1"
++set "STATIC_DIR=%ROOT%app\frontend\react-clone\dist"
++set "DATABASE_URL=file:./.local-data/clone.db"
++set "BUN=bun"
++where bun >NUL 2>NUL || set "BUN=%USERPROFILE%\.bun\bin\bun.exe"
++if not exist "%QUOTA_ROSTER%" echo Roster not found: %QUOTA_ROSTER% & pause & exit /b 1
++if not exist node_modules call "%BUN%" install
++if not exist generated\prisma call "%BUN%" x prisma generate --schema prisma/schema.prisma
++if not exist "%STATIC_DIR%\index.html" (pushd "%ROOT%app\frontend\react-clone" & call "%BUN%" install & call "%BUN%" run build & popd)
++echo Starting BambooHR clone with Quota roster...
++"%BUN%" server.mjs
++echo.
++echo The clone stopped. Press any key to close.
++pause >nul
