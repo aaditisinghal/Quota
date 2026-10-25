@@ -12,6 +12,7 @@ import re
 
 from quota import clock as clk
 from quota import config
+from quota.agent import answer
 from quota.agent.extract import extract_claim, has_authority
 from quota.agent.seat import Seat
 from quota.engine import calculator, checks, disputes, ranking, routing
@@ -65,6 +66,7 @@ class CommissionsAnalyst(Seat):
         super().__init__(world)
         self.extractor = extractor
         self.llm = llm          # None under --scripted: replies use the Phase 1 template
+        self.answer_ids: set[str] = set()   # messages a person typed in /chat: questions there get an answer
 
     def route(self, ev):
         p = ev.payload
@@ -248,7 +250,9 @@ class CommissionsAnalyst(Seat):
         if claim.kind == "other" and claim.problem is None:
             # Thanks or chit-chat needs nothing. But a reply that is neither yes nor no to something Quota asked
             # this person ("sounds good, let's discuss") is no answer: one clarifying question.
-            ctx.route = "ambiguous" if self.awaiting_answer(message) else "noted"
+            # A question typed in /chat is answered, not read as a non-answer to what Quota is waiting on.
+            typed_question = message["id"] in self.answer_ids and answer.is_question(message["text"])
+            ctx.route = "ambiguous" if self.awaiting_answer(message) and not typed_question else "noted"
         elif claim.kind == "unavailable":
             ctx.route = "unavailable"
         else:
@@ -626,6 +630,21 @@ class CommissionsAnalyst(Seat):
                                          f"({refused.refusal_id}). It is waiting on {config.display_name(approver)} "
                                          f"({config.title(approver)}), who decides it in the approval queue.{sender}",
                       "REPLY")
+        return []
+
+    # a question or small talk, not a claim: answered from this person's own facts, never acted on
+
+    def conversation(self, who) -> list[dict]:
+        return queries.fetch_all(self.ro, "SELECT * FROM messages WHERE ((author = ? AND to_principal = ?) OR "
+                                          "(author = ? AND to_principal = ?)) AND known_at <= ? ORDER BY known_at, id",
+                                 (who, self.principal, self.principal, who, self.now))
+
+    def write_noted(self, ctx):
+        message = ctx.data["message"]
+        if message["id"] not in self.answer_ids:
+            return []               # scripted or persona small talk stays unanswered, so replays and ids hold
+        reply = answer.answer(self.llm, message["text"], answer.facts_for(self, message["author"]))
+        self.send(message["author"], reply, "REPLY")
         return []
 
     # anything that did not survive extraction: one clarifying question, never the same one twice in a row

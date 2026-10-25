@@ -147,7 +147,14 @@ def chat(session, as_principal: str, text: str, to: str | None = None) -> dict:
         getattr(world.api, verb)(as_principal, approval_id, reason)
         action = {"kind": verb, "approval_id": approval_id}
     else:
+        analyst = session.analyst
+        if session.llm is not None and analyst.llm is None:
+            # A restored checkpoint or scenario world was built scripted; typed chat still reads with the model.
+            from quota.agent.extract import ModelExtractor
+            analyst.llm, analyst.extractor = session.llm, ModelExtractor(session.llm)
         message_id = world.api.message(as_principal, to or ANALYST, text)
+        # Typed here by a person, so a question or small talk gets an answer (scripted and persona chat does not).
+        analyst.answer_ids.add(message_id)
         action = {"kind": "message", "message_id": message_id, "to": to or ANALYST}
     world.settle()
     replies = [m for m in session.messages(as_principal)
