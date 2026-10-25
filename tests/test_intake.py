@@ -169,6 +169,8 @@ def test_intake_api_and_source_cards(seed7, tmp_path):
     session.attach_inbox(copy)
     client = TestClient(create_app(session, static_dir="no-static"))
     view = client.get("/api/intake").json()
+    ids = [i["id"] for i in view["review_items"]]
+    assert len(ids) == len(set(ids)) == 3 and len(view["log"]) == len(set(view["log"]))
     assert view["backtest"]["errors"] == 3 and view["backtest"]["headline"].startswith("Reproduced")
     assert {f["kind"] for f in view["files"]} >= {"opportunities", "stripe", "payouts"}
     blank = next(i for i in view["review_items"] if i["kind"] == "BLANK_OWNER")

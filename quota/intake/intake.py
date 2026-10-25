@@ -110,7 +110,7 @@ class Intake:
         (self.inbox / "_reviews.json").write_text(json.dumps(self.resolved, indent=2), encoding="utf-8")
 
     def review(self, item_id, kind, routed_to, question, **detail) -> None:
-        if item_id in self.resolved:
+        if item_id in self.resolved or any(i["id"] == item_id for i in self.review_items):
             return
         self.review_items.append({"id": item_id, "kind": kind, "routed_to": routed_to, "question": question,
                                   **detail})
@@ -259,7 +259,8 @@ class Intake:
         db.init_db(conn)
         wp = WritePath(conn, clk.SimClock(INTAKE_AT), {**config.principals(), **PRINCIPAL})
         loaded = {}
-        for table, rows in self.rows_for_load().items():
+        self.load_rows = self.rows_for_load()          # once per run: the row rules log and raise review items
+        for table, rows in self.load_rows.items():
             for fact, record in rows:
                 wp.append_fact(table, {**fact, "source_file": record["_file"], "source_row": record["_row"]}, INTAKE)
             loaded[table] = len(rows)
@@ -271,7 +272,7 @@ class Intake:
     def provenance(self) -> dict:
         """(table, id) -> {file, row, raw} for every fact the inbox carried."""
         out = {}
-        for table, rows in self.rows_for_load().items():
+        for table, rows in self.load_rows.items():
             for fact, record in rows:
                 out[(table, fact["id"])] = {"file": record["_file"], "row": record["_row"],
                                             "raw": self.raw.get((record["_file"], record["_row"]))}
