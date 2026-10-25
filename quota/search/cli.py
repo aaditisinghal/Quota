@@ -56,3 +56,23 @@ def verify(args):
         demo.close()
     print(result["line"])
     return 0 if result["ok"] else 1
+
+
+@action("eval-search")
+def eval_search(args):
+    import json
+    from pathlib import Path
+
+    from quota.search import evidence, search_eval
+    from quota.sim import messages
+    path = Path(args.path or "inbox/messages.jsonl")
+    if not path.exists():
+        corpus, key = messages.corpus_for("fernhill", args.seed)
+        messages.write(corpus, key, path)
+    key = json.loads((path.parent / "messages_key.json").read_text(encoding="utf-8"))
+    backend = evidence.get_backend(str(path))
+    corpus_size = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    result = search_eval.run(backend, key, corpus_size)
+    for line in search_eval.table(result):
+        print(line)
+    print("Written to out/search_eval.json")

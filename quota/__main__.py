@@ -156,7 +156,7 @@ def cmd_gen_messages(args) -> int:
 
 def cmd_elastic(args) -> int:
     from quota.search import elastic_client
-    if not elastic_client.configured():
+    if not elastic_client.configured() and args.action not in ("eval-search", "sweep"):   # these run offline too
         print("Elastic is not configured: set ELASTICSEARCH_URL and ELASTIC_API_KEY in .env")
         return 2
     if args.action == "ping":
