@@ -165,6 +165,18 @@ def check_leave(rows, rep_id, start_date, end_date) -> dict:
             "result": {"lines": [l["id"] for l in lines], "total_cents": sum(l["amount_cents"] for l in lines)}}
 
 
+def check_short_pay(rows, deal_id, tolerance_bps) -> dict:
+    """R5: a payment of at least tolerance_bps of what was invoiced counts as collected for commission. The
+    shortfall (wire fees, say) is AR's to settle; Quota only says so."""
+    billing = [b for b in rows.get("billing", []) if b["deal_id"] == deal_id]
+    invoiced = sum(b["amount_cents"] for b in billing if b["kind"] == "invoice")
+    paid = sum(b["amount_cents"] for b in billing if b["kind"] == "payment")
+    paid_bps = paid * 10000 // invoiced if invoiced else 10000
+    return {"fn": "check_short_pay", "args": {"deal_id": deal_id, "tolerance_bps": tolerance_bps},
+            "result": {"invoiced_cents": invoiced, "paid_cents": paid, "short_cents": max(0, invoiced - paid),
+                       "paid_bps": paid_bps, "collected": paid > 0 and paid_bps >= tolerance_bps}}
+
+
 CHECKS = {fn.__name__: fn for fn in (check_splits, check_backdating, check_collection, check_termination,
                                      check_territory, check_plan_drift, check_resubmission, check_precedent_pattern,
-                                     check_no_rule, check_rep_exceptions, check_leave)}
+                                     check_no_rule, check_rep_exceptions, check_leave, check_short_pay)}

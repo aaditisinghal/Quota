@@ -146,3 +146,15 @@ CREATE INDEX idx_contracts_deal ON contracts(deal_id);
 CREATE INDEX idx_periods ON periods(period);
 CREATE INDEX idx_billing_deal ON billing(deal_id);
 CREATE INDEX idx_messages_to ON messages(to_principal);
+
+-- R6: where an intake fact came from (the file and its 1-based data row); NULL for facts the simulator writes.
+ALTER TABLE people ADD COLUMN source_file TEXT;
+ALTER TABLE people ADD COLUMN source_row INTEGER;
+ALTER TABLE deals ADD COLUMN source_file TEXT;
+ALTER TABLE deals ADD COLUMN source_row INTEGER;
+ALTER TABLE contracts ADD COLUMN source_file TEXT;
+ALTER TABLE contracts ADD COLUMN source_row INTEGER;
+ALTER TABLE esign_events ADD COLUMN source_file TEXT;
+ALTER TABLE esign_events ADD COLUMN source_row INTEGER;
+ALTER TABLE billing ADD COLUMN source_file TEXT;
+ALTER TABLE billing ADD COLUMN source_row INTEGER;

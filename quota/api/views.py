@@ -17,7 +17,7 @@ BASIS_COLUMNS = {"countersignature": ["countersigned_at", "at"], "contract_date"
                  "crm_close_date": ["crm_close_date"], "contract": ["acv_cents"], "amendment_increase": ["acv_cents"],
                  "amendment": ["clauses_json"], "owner_of_record": ["owner_id", "splits_json"],
                  "precedent": ["override_json"]}
-HIDDEN = {"known_at"}
+HIDDEN = {"known_at", "source_file", "source_row"}
 
 
 def basis_columns(field: str, basis: str | None) -> list[str]:
@@ -52,8 +52,9 @@ def timeline(world, since: int = 0) -> list[dict]:
 # ---------- trace ----------
 
 class Graph:
-    def __init__(self, ro, as_of):
+    def __init__(self, ro, as_of, provenance=None):
         self.ro, self.as_of = ro, as_of
+        self.provenance = provenance or {}     # (table, id) -> {file, row, raw}: where an inbox carried the fact
         self.nodes: dict[str, dict] = {}
         self.edges: list[dict] = []
 
@@ -73,6 +74,14 @@ class Graph:
     def get(self, table, row_id):
         row = queries.as_of(self.ro, table, row_id, self.as_of)
         return row if self.known(row) else None
+
+    def source_of(self, ref, row) -> dict | None:
+        """R6: the file and row a fact came from (loaded by the intake, or carried by the served world's inbox),
+        with the raw CSV line when it is known."""
+        if row and row.get("source_file"):
+            found = self.provenance.get((ref["table"], ref["id"]), {})
+            return {"file": row["source_file"], "row": row["source_row"], "raw": found.get("raw")}
+        return self.provenance.get((ref["table"], ref["id"]))
 
     # ----- expanders: each adds its node and returns its id (or None if not known as of the slider) -----
 
@@ -154,7 +163,7 @@ class Graph:
                     newer = f"v{latest['version']} known {latest['known_at']}"
             snippet = {k: v for k, v in (row or {}).items() if k not in HIDDEN}
             self.node(key, "input", key, table=ref["table"], sha256=ref["sha256"], snippet=snippet, highlight=[],
-                      known_at=(row or {}).get("known_at"), newer_version=newer)
+                      known_at=(row or {}).get("known_at"), newer_version=newer, source=self.source_of(ref, row))
             self.edge(decision_id, key, "read")
             linked = {"commission_lines": "line", "approvals": "approval", "journal_entries": "je"}.get(ref["table"])
             if linked:
@@ -319,8 +328,8 @@ def message_decisions(ro, message) -> list[str]:
     return [d["id"] for d in read + same]
 
 
-def trace(ro, kind: str, object_id: str, as_of: str | None = None, depth: int = 3) -> dict:
-    graph = Graph(ro, as_of)
+def trace(ro, kind: str, object_id: str, as_of: str | None = None, depth: int = 3, provenance=None) -> dict:
+    graph = Graph(ro, as_of, provenance)
     if kind not in set(ID_KINDS.values()) | {"deal", "account"}:
         raise KeyError(f"unknown kind {kind}")
     root = graph.expand(kind, object_id, depth)

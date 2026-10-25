@@ -53,6 +53,7 @@ def calc_text(calc) -> str:
 
 
 FACT_ROUTES = {"deal.updated": "deal_updated", "payment.overdue": "overdue", "rep.terminated": "terminated",
+               "payment.received": "payment",
                "rep.territory_changed": "territory", "plan.amended": "plan_amended", "rep.leave": "leave"}
 
 
@@ -1010,6 +1011,31 @@ class CommissionsAnalyst(Seat):
             decision_ids.append(self.flag("backdating_check", deal_id, ctx.rows, ctx.calc, "escalated", text,
                                           [(routing.owner("plan_exception"), note), (routing.owner("material_flag"), note)]))
         return decision_ids + self.write_recoveries(self.pending_recoveries())
+
+    # ---------- payment.received: a short pay is AR's, not Quota's (R5) ----------
+
+    def gather_payment(self, ctx):
+        deal_id = ctx.event.payload["deal_id"]
+        ctx.rows = {"billing": queries.fetch_all(self.ro, "SELECT * FROM billing WHERE deal_id = ? AND known_at <= ? "
+                                                          "ORDER BY id", (deal_id, self.now))}
+
+    def calculate_payment(self, ctx):
+        return checks.check_short_pay(ctx.rows, ctx.event.payload["deal_id"], config.COLLECTION_TOLERANCE_BPS)
+
+    def write_payment(self, ctx):
+        r = ctx.calc["result"]
+        if not r["short_cents"] or not ctx.rows["billing"]:
+            return []
+        deal = self.get("deals", ctx.event.payload["deal_id"])
+        counts = ("counts as collected, so commission is released" if r["collected"] else
+                  "is below the tolerance, so commission waits for the rest")
+        text = (f"FYI to AR: {deal['account']} paid {fmt_usd(r['paid_cents'])} of {fmt_usd(r['invoiced_cents'])} "
+                f"invoiced ({r['paid_bps'] / 100:.2f}%); the {fmt_usd(r['short_cents'])} shortfall is AR's to settle, "
+                f"Quota does not correct it. {r['paid_bps'] / 100:.2f}% {counts} (tolerance "
+                f"{config.COLLECTION_TOLERANCE_BPS / 100:.0f}%)")
+        decision_id = self.flag("short_pay", deal["id"], ctx.rows, ctx.calc, "posted", text)
+        self.emit("FYI", f"to AR: {deal['account']} short-paid {fmt_usd(r['short_cents'])} ({decision_id})")
+        return [decision_id]
 
     # ---------- payment.overdue: collection hold (E07) ----------
 

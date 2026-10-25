@@ -44,6 +44,10 @@ class StepIn(BaseModel):
     n: int
 
 
+class ReviewIn(BaseModel):
+    resolution: dict
+
+
 # The guided demo (R4): the start, then each checkpoint of the scripted story, with what to say there.
 DEMO_STEPS = [
     ("start", "Monday 2026-04-27, just after the April commission run: Acme is booked in Q2 at $12,000."),
@@ -77,7 +81,7 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
             as_of = clk.end_of_day(as_of)            # a bare date means the end of that day
         with session.lock:
             try:
-                graph = views.trace(session.ro, kind, object_id, as_of, depth)
+                graph = views.trace(session.ro, kind, object_id, as_of, depth, session.provenance)
             except KeyError as exc:
                 raise HTTPException(404, str(exc))
         if not graph["known"] and as_of is None:
@@ -170,7 +174,33 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
             return {"n": body.n, "checkpoint": checkpoint, "narration": narration,
                     "clock": session.world.clock.now(), "timeline": views.timeline(session.world, 0)}
 
+    def intake_view():
+        if session.intake is None:
+            raise HTTPException(404, "no inbox attached; serve with --from-inbox (or run python -m quota intake inbox/)")
+        report, result = session.intake["report"], session.intake["backtest"]
+        return {"inbox": session.inbox,
+                "files": [{"file": f["file"], "kind": f["kind"], "rows": f["rows"], "loaded": f.get("loaded"),
+                           "mapping_source": f.get("mapping_source"), "mappings": f.get("mappings", [])}
+                          for f in report["files"]],
+                "loaded": report["loaded"], "review_items": report["review_items"], "log": report["log"],
+                "plans": report["plans"],
+                "backtest": {k: result[k] for k in ("quarter", "rows", "matched", "errors", "unexplained",
+                                                    "overpaid_cents", "headline", "findings")}}
+
+    def review_resolve(item_id: str, body: ReviewIn):
+        if session.intake is None:
+            raise HTTPException(404, "no inbox attached")
+        from quota.intake.intake import resolve
+        with session.lock:
+            if item_id not in {i["id"] for i in session.intake["report"]["review_items"]}:
+                raise HTTPException(404, f"no open review item {item_id}")
+            resolve(session.inbox, item_id, body.resolution)
+            session.attach_inbox(session.inbox)
+            return {"resolved": item_id, **intake_view()}
+
     for prefix in ("/api", ""):        # NEXT_TASKS names /api/...; the UI calls the root paths like the rest
+        app.get(f"{prefix}/intake")(intake_view)
+        app.post(f"{prefix}/review/{{item_id}}")(review_resolve)
         app.get(f"{prefix}/scenarios")(scenario_menu)
         app.post(f"{prefix}/scenarios/{{name}}/run")(scenario_run)
         app.post(f"{prefix}/demo/reset")(demo_reset)

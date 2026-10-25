@@ -7,7 +7,7 @@ name = "quota"
 version = "0.1.0"
 description = "Quota: an agent-run commissions desk with an append-only, hash-chained ledger."
 requires-python = ">=3.11"
-dependencies = ["pyyaml", "pytest", "anthropic", "stripe", "fastapi", "uvicorn", "httpx"]
+dependencies = ["pyyaml", "pytest", "anthropic", "stripe", "fastapi", "uvicorn", "httpx", "fpdf2", "pypdf"]
 
 [tool.setuptools.packages.find]
 include = ["quota*"]

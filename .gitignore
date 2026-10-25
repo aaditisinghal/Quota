@@ -16,3 +16,7 @@ runs/
 
 # R4 checkpoint snapshots (rebuilt by `python -m quota demo acme`)
 .checkpoints/
+
+# R6 exports and backtest output (python -m quota export / backtest)
+inbox/
+out/

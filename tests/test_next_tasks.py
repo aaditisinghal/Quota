@@ -300,3 +300,50 @@ def test_scenario_impersonation(cp_dir):
         assert res["a_0002_pending"]
     finally:
         demo.close()
+
+
+def test_scenario_priya_rejects(cp_dir):
+    demo, r = scenario("priya_rejects", cp_dir)
+    try:
+        res = r["result"]
+        line = queries.as_of(demo.ro, "commission_lines", "CL-0001", None)
+        assert (line["booking_quarter"], line["amount_cents"]) == ("2026Q2", 1_200_000)
+        assert queries.fetch_all(demo.ro, "SELECT id FROM commission_lines WHERE corrects_id = 'CL-0001' "
+                                          "AND amount_cents > 0") == []          # never re-booked into Q1
+        assert res["jordan_told"]
+        assert res["trial_balance"] == {"1000": 1_800_000, "1290": 1_200_000, "4000": -3_000_000}
+        schedule = queries.fetch_one(demo.ro, "SELECT schedule_json FROM amortization_schedules WHERE line_id = 'CL-0001'")
+        assert [c for _, c in queries.loads(schedule["schedule_json"])] == [33_333] * 35 + [33_345]
+        clean(demo.ro)
+        # The same exception again, with nothing new: refused by the existing resubmission check.
+        demo.world.api.message("marcus.lee", "seat:commissions_analyst", "Honor Mar 31 for Acme. Count it in Q1.")
+        demo.world.settle()
+        check = queries.fetch_one(demo.ro, "SELECT outcome FROM decisions WHERE kind = 'resubmission_check'")
+        assert check["outcome"] == "refused"
+    finally:
+        demo.close()
+
+
+def test_scenario_short_pay_98(cp_dir):
+    demo, r = scenario("short_pay_98", cp_dir)
+    try:
+        res = r["result"]
+        assert res["collected"] and res["paid_lines"] == ["CL-0002"]
+        assert len(res["fyi"]) == 1 and "$2,400.00 shortfall" in res["fyi"][0] and "AR" in res["fyi"][0]
+        assert queries.trial_balance(demo.ro)["1200"] == 240_000     # never corrected by Quota
+        clean(demo.ro)
+    finally:
+        demo.close()
+
+
+def test_collection_tolerance_is_98_percent():
+    from quota import config
+    from quota.engine import checks
+    assert config.COLLECTION_TOLERANCE_BPS == 9800
+    rows = {"billing": [{"deal_id": "d", "kind": "invoice", "amount_cents": 10_000_000},
+                        {"deal_id": "d", "kind": "payment", "amount_cents": 9_799_999}]}
+    assert checks.check_short_pay(rows, "d", 9800)["result"]["collected"] is False
+    rows["billing"][1]["amount_cents"] = 9_800_000
+    assert checks.check_short_pay(rows, "d", 9800)["result"] == {
+        "invoiced_cents": 10_000_000, "paid_cents": 9_800_000, "short_cents": 200_000, "paid_bps": 9800,
+        "collected": True}
