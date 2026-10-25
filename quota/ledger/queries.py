@@ -122,9 +122,16 @@ def pending_approvals(conn, t) -> list[dict]:
 
 
 def collected(conn, deal_id, t) -> bool:
-    """Has the customer paid anything on this deal (the plan pays on collection)?"""
-    return fetch_one(conn, "SELECT id FROM billing WHERE deal_id = ? AND kind = 'payment' AND known_at <= ? LIMIT 1",
-                     (deal_id, t)) is not None
+    """Has the customer paid this deal (the plan pays on collection)? A payment of at least
+    config.COLLECTION_TOLERANCE_BPS of what was invoiced counts (R5: a 98% wire after fees is collected)."""
+    from quota import config
+    billing = fetch_all(conn, "SELECT kind, amount_cents FROM billing WHERE deal_id = ? AND kind IN ('invoice', "
+                              "'payment') AND known_at <= ?", (deal_id, t))
+    paid = sum(b["amount_cents"] for b in billing if b["kind"] == "payment")
+    invoiced = sum(b["amount_cents"] for b in billing if b["kind"] == "invoice")
+    if not any(b["kind"] == "payment" for b in billing):
+        return False
+    return not invoiced or paid * 10000 >= invoiced * config.COLLECTION_TOLERANCE_BPS
 
 
 def chain_ids(conn, root_id, t=None) -> list[str]:

@@ -65,6 +65,7 @@ ESCALATE_AFTER_BUSINESS_DAYS = 2   # then routing.ESCALATION backup; never auto-
 PAYROLL_DAY = 15                   # payroll for period YYYY-MM releases on YYYY-MM-15
 PAYROLL_BLOCKING_DAYS = 2          # approvals blocking a payroll this close go out immediately
 PROPOSE_PLAN_CHANGE_AFTER = 2      # the same kind of exception on this many deals -> propose a signed plan change
+COLLECTION_TOLERANCE_BPS = 9800    # a payment of 98% or more of the invoice counts as collected (R5)
 
 
 def principals(with_seed: bool = False) -> dict:
