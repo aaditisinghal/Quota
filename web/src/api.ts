@@ -181,6 +181,34 @@ export type Scorecard = {
   } | null;
 };
 
+// Scenarios and presenter mode (NEXT_TASKS R4, R7.3). Servers without them answer 404 or 405.
+export type Scenario = { name: string; phrase: string; checkpoint: string; expect: unknown };
+
+export type ScenarioRun = {
+  name: string;
+  clock: string;
+  timeline: TimelineItem[];
+  result: { ok: boolean; summary: string; [field: string]: unknown };
+};
+
+export type DemoStep = { n: number; narration: string; tab?: string };
+
+export type DemoStepRun = { n: number; narration: string; clock: string; timeline: TimelineItem[]; tab?: string };
+
+/** An API error with its HTTP status, so a screen can tell "not on this server" from a failure. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+  get missing(): boolean {
+    return this.status === 404 || this.status === 405;
+  }
+}
+
+export function isMissing(e: unknown): boolean {
+  return e instanceof ApiError && e.missing;
+}
+
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, body === undefined ? undefined : {
     method: "POST",
@@ -194,7 +222,7 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
     } catch {
       // not JSON
     }
-    throw new Error(String(detail));
+    throw new ApiError(String(detail), response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -212,5 +240,10 @@ export const api = {
     call<Statement>(`/statement/${encodeURIComponent(rep)}?as_principal=${encodeURIComponent(viewer)}`),
   chat: (as_principal: string, text: string) => call<ChatTurn>("/chat", { as_principal, text }),
   parse: (text: string) => call<Parsed>("/inject/parse", { text }),
+  scenarios: () => call<Scenario[]>("/scenarios"),
+  runScenario: (name: string) => call<ScenarioRun>(`/scenarios/${encodeURIComponent(name)}/run`, {}),
+  reset: () => call<{ clock: string }>("/demo/reset", {}),
+  steps: () => call<DemoStep[]>("/demo/steps"),
+  step: (n: number) => call<DemoStepRun>("/demo/step", { n }),
   run: (events: InjectEvent[]) => call<{ clock: string; timeline: TimelineItem[] }>("/inject/run", { events }),
 };

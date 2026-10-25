@@ -281,3 +281,16 @@ time[title] { cursor: help; }
 .bubble details.details, .tl details.details { margin-top: 4px; }
 .bubble details.details > summary, .tl details.details > summary { font-family: var(--sans); font-size: 11.5px; color: var(--ink-3); }
 .money, .num { font-variant-numeric: tabular-nums; }
+
+/* presenter mode: a bar along the bottom, one narration line per step */
+.app.presenting { padding-bottom: 76px; }
+.top button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.presenter { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; align-items: center; gap: 18px; padding: 12px 24px; background: var(--panel); border-top: 2px solid var(--ink); box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06); }
+.presenter-controls { display: flex; gap: 6px; }
+.presenter-step { display: flex; flex-direction: column; align-items: center; min-width: 56px; }
+.presenter-count { font-family: var(--mono); font-size: 15px; font-weight: 600; }
+.presenter-time { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+.presenter-narration { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.presenter-narration strong { font-size: 15px; font-weight: 600; }
+.presenter-close { margin-left: auto; text-decoration: none; font-size: 16px; }
+@media (max-width: 700px) { .presenter { flex-wrap: wrap; gap: 8px; padding: 10px 16px; } .app.presenting { padding-bottom: 130px; } }

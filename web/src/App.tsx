@@ -3,6 +3,7 @@ import { api, type TimelineItem, type WorldState } from "./api";
 import { CaseView } from "./Case";
 import { ChatPane } from "./ChatPane";
 import { InjectScore } from "./InjectScore";
+import { Presenter } from "./Presenter";
 import { Timeline } from "./Timeline";
 import { TodayHealth } from "./TodayHealth";
 import { TraceView } from "./TraceView";
@@ -34,6 +35,20 @@ export function App() {
   const [version, setVersion] = useState(0);
   const [principal, setPrincipal] = useState("jordan.kim");
   const [offline, setOffline] = useState(false);
+  const [presenting, setPresenting] = useState(() => {
+    try {
+      return sessionStorage.getItem("quota.presenting") === "1" || /[?&]present\b/.test(window.location.search);
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("quota.presenting", presenting ? "1" : "0");
+    } catch {
+      // not kept in a private window
+    }
+  }, [presenting]);
   const count = useRef(0);
 
   useEffect(() => {
@@ -46,11 +61,25 @@ export function App() {
     if (id && tab === "case") setCaseLine(id);
   }, [id, tab]);
 
-  const refresh = useCallback(async () => {
+  // `full` reloads the whole timeline: a restored checkpoint (presenter, scenario, reset) rewinds it, so lines
+  // seen before may no longer be true. A shorter timeline than we hold means someone else rewound it.
+  const generation = useRef(0);
+  const refresh = useCallback(async (full = false) => {
+    if (full) generation.current += 1;
+    const mine = generation.current;
     try {
-      const [world, timeline] = await Promise.all([api.state(), api.timeline(count.current)]);
+      let [world, timeline] = await Promise.all([api.state(), api.timeline(full ? 0 : count.current)]);
+      if (!full && world.timeline_length < count.current) {
+        full = true;
+        generation.current += 1;
+        timeline = await api.timeline(0);
+      }
+      if (mine !== generation.current && !full) return; // a full reload started since; its answer wins
       timeline.items.forEach((i) => i.kind === "FACT" && learnAccountsFromText(i.text));
-      if (timeline.items.length) {
+      if (full) {
+        count.current = timeline.items.length ? timeline.items[timeline.items.length - 1].seq : 0;
+        setItems(timeline.items);
+      } else if (timeline.items.length) {
         count.current = Math.max(count.current, timeline.items[timeline.items.length - 1].seq);
         // Two refreshes can overlap (a poll and an action); keep each line once.
         setItems((old) => {
@@ -66,12 +95,23 @@ export function App() {
       setOffline(true);
     }
   }, []);
+  const update = useCallback(() => refresh(), [refresh]);
+  const resync = useCallback(() => refresh(true), [refresh]);
 
+  // Presenter mode polls faster (R7.6), so what the room sees keeps up with the narration.
   useEffect(() => {
     refresh();
-    const timer = window.setInterval(refresh, 5000);
+    const timer = window.setInterval(() => refresh(), presenting ? 1500 : 5000);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, presenting]);
+
+  const onMoved = useCallback(
+    (to?: string) => {
+      resync();
+      if (to && TABS.some(([key]) => key === to)) window.location.hash = to;
+    },
+    [resync],
+  );
 
   const pending = state?.pending_approvals ?? [];
   const pendingIds = useMemo(() => new Set(pending.map((a) => a.id)), [pending]);
@@ -80,7 +120,7 @@ export function App() {
   const waiting = pending.reduce((s, a) => s + a.amount_cents, 0);
 
   return (
-    <div className="app">
+    <div className={`app ${presenting ? "presenting" : ""}`}>
       <header className="top">
         <div className="brand">
           <span className="logo">Q</span>
@@ -101,6 +141,9 @@ export function App() {
           </a>
         )}
         {offline && <span className="badge">API unreachable</span>}
+        <button className={presenting ? "on" : ""} onClick={() => setPresenting((p) => !p)} title="Presenter mode: Back, Next, Reset">
+          {presenting ? "Presenting" : "Present"}
+        </button>
       </header>
       <nav className="tabs" role="tablist">
         {TABS.map(([key, label]) => (
@@ -114,7 +157,7 @@ export function App() {
         <main>
           {tab === "case" && (
             <CaseView line={caseLine} items={items} people={people} pending={pending} principal={principal}
-                      setPrincipal={setPrincipal} away={state?.away ?? {}} version={version} onChange={refresh} />
+                      setPrincipal={setPrincipal} away={state?.away ?? {}} version={version} onChange={update} />
           )}
           {tab === "trace" && (
             <TraceView id={traceId} stops={stops} people={people}
@@ -123,15 +166,16 @@ export function App() {
           {tab === "chat" && (
             <ChatPane principal={principal} setPrincipal={setPrincipal} people={people} pending={pending}
                       away={state?.away ?? {}}
-                      version={version} onChange={refresh} />
+                      version={version} onChange={update} />
           )}
           {tab === "today" && <TodayHealth version={version} people={people} />}
           {tab === "inject" && state && (
-            <InjectScore clock={state.clock} people={people} world={state.world} seed={state.seed} onChange={refresh} />
+            <InjectScore clock={state.clock} people={people} world={state.world} seed={state.seed} onChange={update} />
           )}
         </main>
         {tab !== "case" && <Timeline items={items} people={people} pending={pendingIds} />}
       </div>
+      {presenting && <Presenter onMoved={onMoved} onClose={() => setPresenting(false)} paused={false} />}
     </div>
   );
 }
