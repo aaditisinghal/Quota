@@ -80,9 +80,14 @@ EDGAR; paraphrased):
 ## Screens
 
 `python -m quota serve`, then open http://127.0.0.1:8000. The Acme world is paused at 2026-04-27 17:00, right
-after the April commission run drafted Jordan's $12,000 Q2 line, and you play the people. Four tabs, with the
-printed timeline on the right of each:
+after the April commission run drafted Jordan's $12,000 Q2 line, and you play the people. Five tabs, with the
+printed timeline on the right of each but the first:
 
+- **Case.** The disputed line in one screen. Evidence: the CRM record ("Close date Mar 31", outranked) next to
+  the signed contract ("Countersigned Apr 2, 10:14 AM PT", used), under the rule that decides. Decision: the
+  figure ($12,000.00 vs $18,000.00 claimed) and the approval chain in order: held twice, escalated, Marcus
+  approved, over his $5,000 limit, routed to Priya, refusals with a lock and their codes, her decision. The
+  conversation runs alongside.
 - **Chat.** Speak as Jordan, Marcus, Priya, Dana or Morgan. Approvals waiting on that person show in orange
   with Approve and Reject buttons (`approve A-0002` typed in chat does the same).
 - **Trace.** Any number, then its entry, decision (replayed from its recorded inputs), how each field was
@@ -95,7 +100,13 @@ printed timeline on the right of each:
   edit a field, run. Below it, the measured scorecard for seed 7, case by case.
 
 Every dollar figure that belongs to one object links to its trace; trial-balance figures link to the account's
-entries. Refusals show as timeline items with their reason codes. Orange marks only what needs a person.
+entries. Refusals show as timeline items with their reason codes. Orange marks only what needs a person. Times
+read in company time (`Apr 2, 10:14 AM PT`, ISO on hover), negatives in parentheses, and sources by name; the
+raw line is under "Details". A figure that changes flashes and counts to its new value.
+
+**Presenter mode** ("Present" in the header): a bottom bar with Back, Next and Reset (← → R), the step number
+and one narration line per step; each Next runs the next scripted event from its checkpoint. **Scenarios**
+(⌘K / Ctrl+K): the rehearsed scenarios by phrase; choosing one runs it and opens the tab where its result shows.
 
 **Walkthrough (done in a headless Chromium, by clicking).**
 
@@ -118,7 +129,7 @@ entries. Refusals show as timeline items with their reason codes. Orange marks o
 The API run gives the same twelve journal entries as the scripted demo. One timing differs: the Controller's
 routine approvals come 30 minutes after a request, so April's $500 amortization posts as a catch-up on May 31.
 
-| Dispute held | Over the limit, routed on | Churn: ledger health | Trace as of April 30 |
+| Case view: held, routed to the Controller | Over the limit, routed on | Churn: ledger health | Trace as of April 30 |
 | --- | --- | --- | --- |
 | ![](docs/screens/1-dispute.png) | ![](docs/screens/2-over-limit.png) | ![](docs/screens/3-churn-ledger-health.png) | ![](docs/screens/4-trace-as-of-april-30.png) |
 
