@@ -324,7 +324,12 @@ class Flow:
                 inc = [l for l in lines if (self.calc_of(l) or {}).get("subject_id", "").startswith(key)]
                 children.append({"id": key, "version": c["version"], "signed_at": terms.get("signed_at"),
                                  "acv_cents": c["acv_cents"], "incremental_lines": [l["id"] for l in inc],
-                                 "incremental_commission_cents": sum(l["amount_cents"] for l in inc)})
+                                 "incremental_commission_cents": sum(l["amount_cents"] for l in inc),
+                                 # who is credited on the increase (the deal's own splits: an amendment has no
+                                 # separate seller in the engine)
+                                 "recipients": [{"kind": "rep", "who": l["rep_id"], "name": config.display_name(l["rep_id"]),
+                                                 "line": l["id"], "amount_cents": l["amount_cents"],
+                                                 "confidence": self.confidence(l["id"])} for l in inc]})
         return {"id": deal_id, "customer": deal["account"], "acv_cents": base["acv_cents"], "term_months": base["term_months"],
                 "billing": clauses.get("billing"), "ramp": clauses.get("ramp"),
                 "clauses": {k: v for k, v in clauses.items() if k not in ("billing", "ramp", "amendment")},

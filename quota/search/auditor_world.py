@@ -18,11 +18,21 @@ STORY = [   # the scripted beats of the Acme story, replayed on the served world
 ]
 
 
+# DEMO_FLOW D4: Orbit is amended mid-term (ACV $80,000 -> $100,000, signed May 5) and the May commission run books
+# the increase as its own lines (E12), so the contract card has an expansion child.
+EXPANSION = [
+    ("2026-05-05T17:00:00Z", "contract.amended", {"deal_id": "orbit", "terms": {"acv_cents": 10_000_000, "kind": "amendment"},
+                                                  "signed_at": "2026-05-05T17:00:00Z"}),
+    ("2026-05-06T20:00:00Z", "job.due", {"job": "commission_run", "period": "2026-05", "since": "2026-05"}),
+]
+
+
 def build(until="2026-05-15T18:00:00Z"):
     demo = scenarios.served_world([scenarios.SIDE_LETTER_MESSAGE])
     world = demo.world
     world.people.actions.extend(STORY)
     world.people.actions.sort(key=lambda a: a["at"])
     scenarios.schedule(world, scenarios.SUMMIT_BILLING)
+    scenarios.schedule(world, EXPANSION)
     world.run_until(until)
     return demo

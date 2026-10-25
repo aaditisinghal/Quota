@@ -120,3 +120,12 @@ def test_the_cfo_presenter_script_restores_the_morning_and_june(tmp_path):
         assert len(client.get("/demo/steps").json()) == 6                       # the default script is unchanged
     finally:
         session.close()
+
+
+def test_an_amendment_is_a_child_card_with_incremental_commission_only(client):
+    orbit = client.get("/api/contracts/orbit").json()
+    assert orbit["acv_cents"] == 8_000_000 and [l["id"] for l in orbit["lines"]] == ["CL-0002", "CL-0003"]
+    child = orbit["children"][0]
+    assert (child["id"], child["version"], child["acv_cents"]) == ("orbit+v2", 2, 10_000_000)
+    assert child["incremental_commission_cents"] == sum(r["amount_cents"] for r in child["recipients"]) == 200_000
+    assert [(r["who"], r["line"]) for r in child["recipients"]] == [("alex.chen", "CL-0006"), ("riley.shah", "CL-0007")]
