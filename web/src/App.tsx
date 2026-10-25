@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type ScenarioRun, type TimelineItem, type WorldState } from "./api";
+import { api, isMissing, type ScenarioRun, type TimelineItem, type WorldState } from "./api";
 import { CaseView } from "./Case";
 import { ChatPane } from "./ChatPane";
 import { InjectScore } from "./InjectScore";
+import { IntakeView } from "./Intake";
 import { Presenter } from "./Presenter";
 import { ScenarioMenu, ScenarioResult } from "./Scenarios";
 import { Timeline } from "./Timeline";
@@ -10,13 +11,14 @@ import { TodayHealth } from "./TodayHealth";
 import { TraceView } from "./TraceView";
 import { When, learnAccountsFromText, setWorldYear, usd } from "./format";
 
-type Tab = "case" | "trace" | "chat" | "today" | "inject";
+type Tab = "case" | "trace" | "chat" | "today" | "inject" | "intake";
 const TABS: [Tab, string][] = [
   ["case", "Case"],
   ["chat", "Chat"],
   ["trace", "Trace"],
   ["today", "Today + Ledger health"],
   ["inject", "Inject + Scorecard"],
+  ["intake", "Intake"],
 ];
 
 function route(): { tab: Tab; id: string | null } {
@@ -106,6 +108,14 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [refresh, presenting]);
 
+  // The Intake tab shows only on a server with an inbox (--from-inbox).
+  const [hasIntake, setHasIntake] = useState(false);
+  useEffect(() => {
+    api
+      .intake()
+      .then(() => setHasIntake(true))
+      .catch((e) => isMissing(e) && setHasIntake(false));
+  }, []);
   const [menu, setMenu] = useState(false);
   const [ran, setRan] = useState<ScenarioRun | null>(null);
   useEffect(() => {
@@ -172,7 +182,7 @@ export function App() {
         </button>
       </header>
       <nav className="tabs" role="tablist">
-        {TABS.map(([key, label]) => (
+        {TABS.filter(([key]) => key !== "intake" || hasIntake || tab === "intake").map(([key, label]) => (
           <a key={key} role="tab" aria-selected={tab === key} className={`tab ${tab === key ? "on" : ""}`}
              href={key === "trace" ? `#trace/${encodeURIComponent(traceId)}` : `#${key}`}>
             {label}
@@ -196,6 +206,7 @@ export function App() {
                       version={version} onChange={update} />
           )}
           {tab === "today" && <TodayHealth version={version} people={people} />}
+          {tab === "intake" && <IntakeView people={people} version={version} onChange={update} />}
           {tab === "inject" && state && (
             <InjectScore clock={state.clock} people={people} world={state.world} seed={state.seed} onChange={update} />
           )}

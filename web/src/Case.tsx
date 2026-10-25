@@ -161,6 +161,12 @@ function caseFacts(trace: Trace, items: TimelineItem[]): Facts | null {
   };
 }
 
+/** Where an intake-loaded record came from (R6): its export file, row, and the raw CSV line. */
+export function provenance(node: TraceNode): { file: string; row: number; raw?: string } | null {
+  const source = node.source as { file?: string; row?: number; raw?: string } | null | undefined;
+  return source && typeof source === "object" && source.file ? { file: source.file, row: source.row ?? 0, raw: source.raw } : null;
+}
+
 function highlightField(node: TraceNode, resolves: string, role: string): string {
   const marks = (node.highlight as { field: string; role: string; resolves: string }[]) ?? [];
   return marks.find((m) => m.resolves === resolves && m.role === role)?.field ?? "";
@@ -206,7 +212,8 @@ function SourceCard({ node, field, role, note }: { node: TraceNode; field: strin
   const table = String(node.table ?? "");
   const title = table === "deals" ? "CRM opportunity" : table === "contracts" ? "E-signature · signed contract" : table;
   const system = String(snippet.source ?? "");
-  const file = node.source_file ? `${String(node.source_file)} · row ${String(node.source_row ?? "?")}` : null;
+  const origin = provenance(node);
+  const file = origin ? `${origin.file} · row ${origin.row}` : null;
   const shown = ["account", "crm_amount_cents", "acv_cents", "term_months", "owner_id"].filter((k) => k in snippet && k !== field);
   return (
     <div className={`card source ${role}`}>
@@ -230,7 +237,7 @@ function SourceCard({ node, field, role, note }: { node: TraceNode; field: strin
       <p className="muted source-note">{note}</p>
       <details className="details">
         <summary>{file ?? `${table} · ${String(snippet.id ?? node.id)}`} · raw row</summary>
-        {node.source_line ? <pre className="raw">{String(node.source_line)}</pre> : null}
+        {origin?.raw ? <pre className="raw">{origin.raw}</pre> : null}
         <table className="snippet">
           <tbody>
             {Object.entries(snippet).map(([k, v]) => (

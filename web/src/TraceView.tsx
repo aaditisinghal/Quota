@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { provenance } from "./Case";
 import { api, type Principal, type Trace, type TraceEdge, type TraceNode } from "./api";
 import { Money, Rich, TraceLink, When, isTraceable, learnAccounts, personName, pt, sourceName, usd } from "./format";
 
@@ -344,8 +345,17 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
     case "input": {
       const snippet = (n.snippet as Record<string, unknown>) ?? {};
       const highlight = (n.highlight as { field: string; role: string; resolves: string }[]) ?? [];
+      const origin = provenance(node);
       return (
         <>
+          {origin && (
+            <details className="details origin">
+              <summary>
+                {origin.file} · row {origin.row}
+              </summary>
+              {origin.raw && <pre className="raw">{origin.raw}</pre>}
+            </details>
+          )}
           <table className="snippet">
             <tbody>
               {Object.entries(snippet).map(([k, v]) => {
@@ -377,7 +387,7 @@ function Body({ node, people }: { node: TraceNode; people: Principal[] }) {
             <summary>Details</summary>
             <p className="muted mono">
               {node.id}
-              {n.source_file ? ` · ${str(n.source_file)} row ${str(n.source_row)}` : ""} · sha256 {str(n.sha256)}
+              {" "}· sha256 {str(n.sha256)}
             </p>
           </details>
         </>

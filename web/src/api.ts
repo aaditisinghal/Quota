@@ -210,6 +210,63 @@ export function isMissing(e: unknown): boolean {
   return e instanceof ApiError && e.missing;
 }
 
+// Intake of messy exports (NEXT_TASKS R6): only on a server started with --from-inbox; others answer 404.
+export type Mapping = {
+  source_column: string;
+  canonical_field: string;
+  transform: string;
+  confidence: number;
+  proposed_by: string;
+  parse_rate?: number;
+  type_ok?: boolean;
+  problems?: string[];
+  status: string;
+};
+
+export type ReviewItem = {
+  id: string;
+  kind: string;
+  routed_to: string;
+  question: string;
+  file?: string;
+  row?: number;
+  [detail: string]: unknown;
+};
+
+export type Finding = {
+  id: string;
+  outcome: string;
+  routed_to: string;
+  file: string;
+  row: number;
+  rep: string;
+  deal: string;
+  paid_cents: number;
+  correct_cents: number;
+  overpaid_cents: number;
+  class: string;
+  text: string;
+};
+
+export type Intake = {
+  inbox: string;
+  files: { file: string; kind: string | null; rows: number; loaded?: boolean | null; mapping_source?: string | null; mappings: Mapping[] }[];
+  loaded: Record<string, number>;
+  review_items: ReviewItem[];
+  log: string[];
+  plans: Record<string, { file: string; terms?: Record<string, { value: unknown; quote: string; section: number; read_by?: string }> }>;
+  backtest: {
+    quarter: string;
+    rows: number;
+    matched: number;
+    errors: number;
+    unexplained: number;
+    overpaid_cents: number;
+    headline: string;
+    findings: Finding[];
+  };
+};
+
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(path, body === undefined ? undefined : {
     method: "POST",
@@ -246,5 +303,8 @@ export const api = {
   reset: () => call<{ clock: string }>("/demo/reset", {}),
   steps: () => call<DemoStep[]>("/demo/steps"),
   step: (n: number) => call<DemoStepRun>("/demo/step", { n }),
+  intake: () => call<Intake>("/intake"),
+  review: (id: string, resolution: Record<string, unknown>) =>
+    call<Intake & { resolved: string }>(`/review/${encodeURIComponent(id)}`, { resolution }),
   run: (events: InjectEvent[]) => call<{ clock: string; timeline: TimelineItem[] }>("/inject/run", { events }),
 };

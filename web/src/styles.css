@@ -321,3 +321,15 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
 .scenario-result.ran { border-left-color: var(--ink); }
 .scenario-reply { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
+
+/* R7.7 intake */
+.headline { font-size: 18px; font-weight: 600; margin: 0 0 12px; }
+.findings { margin-top: 14px; }
+.panel.human-panel { border-color: var(--accent-line); }
+.review-card { margin-bottom: 10px; }
+.review-question { margin: 4px 0 6px; }
+.review-card .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.review-card select, .review-card input { width: auto; min-width: 220px; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--panel); font: inherit; color: inherit; }
+.table.mapping { margin-top: 6px; }
+.table.mapping td, .table.mapping th { font-size: 12px; padding: 3px 6px; }
+ul.log { margin: 8px 0 0; padding-left: 18px; font-size: 12px; }
