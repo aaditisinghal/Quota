@@ -456,3 +456,55 @@ def statement(world, rep_id) -> dict:
         q["attainment_bps"] = q["credit_cents"] * 10000 // quota_cents if quota_cents else None
     return {"rep": rep_id, "name": config.display_name(rep_id), "as_of": now, "quota_cents": quota_cents,
             "quarters": [quarters[k] for k in sorted(quarters)]}
+
+
+# ---------- How it works: live counts behind the architecture page ----------
+
+TABLE_GROUPS = {
+    "facts": ["people", "deals", "contracts", "esign_events", "plans", "billing", "messages", "periods", "precedents"],
+    "work": ["events", "event_status", "decisions", "commission_lines", "commission_line_status", "approvals",
+             "approval_decisions", "refusals"],
+    "books": ["journal_entries", "je_lines", "je_status", "amortization_schedules", "payroll_files", "payroll_status"],
+    "integrity": ["chain"],
+}
+
+
+def architecture(world) -> dict:
+    """Counts from the running world for each box on the architecture page: what has been collected, decided,
+    refused and written so far. Read-only."""
+    ro, now = world.ro, world.clock.now()
+    one = lambda sql, *a: queries.fetch_one(ro, sql, a)
+    group = lambda sql, *a: {r["k"]: r["n"] for r in queries.fetch_all(ro, sql, a)}
+    tables = {name: one(f"SELECT COUNT(*) AS n FROM {name}")["n"] for names in TABLE_GROUPS.values() for name in names}
+    codes: dict[str, int] = {}
+    for row in queries.fetch_all(ro, "SELECT reason_codes_json FROM refusals"):
+        for code in json.loads(row["reason_codes_json"]):
+            codes[code] = codes.get(code, 0) + 1
+    statuses: dict[str, int] = {}
+    for line in queries.fetch_all(ro, "SELECT id FROM commission_lines"):
+        status = queries.line_status(ro, line["id"]) or "draft"
+        statuses[status] = statuses.get(status, 0) + 1
+    checks = invariants.check_all(ro)
+    chain_ok, _ = hashing.verify_chain(ro)
+    return {
+        "clock": now,
+        "tables": tables,
+        "table_groups": TABLE_GROUPS,
+        "events_by_type": group("SELECT type AS k, COUNT(*) AS n FROM events GROUP BY type ORDER BY n DESC"),
+        "events_waiting": len(world.queue.upcoming()),
+        "event_status": group("SELECT status AS k, COUNT(*) AS n FROM event_status GROUP BY status"),
+        "decisions_by_kind": group("SELECT kind AS k, COUNT(*) AS n FROM decisions GROUP BY kind ORDER BY n DESC"),
+        "decisions_by_outcome": group("SELECT outcome AS k, COUNT(*) AS n FROM decisions GROUP BY outcome ORDER BY n DESC"),
+        "decisions_with_model": one("SELECT COUNT(*) AS n FROM decisions WHERE model IS NOT NULL")["n"],
+        "refusals_by_code": dict(sorted(codes.items(), key=lambda kv: -kv[1])),
+        "line_statuses": statuses,
+        "approvals": {"pending": len(queries.pending_approvals(ro, now)),
+                      "decided": one("SELECT COUNT(DISTINCT approval_id) AS n FROM approval_decisions")["n"]},
+        "entries_by_status": group("SELECT s.status AS k, COUNT(*) AS n FROM je_status s WHERE s.rowid = "
+                                   "(SELECT MAX(rowid) FROM je_status t WHERE t.je_id = s.je_id) GROUP BY s.status"),
+        "invariants_ok": {name: not violations for name, violations in checks.items()} | {"INV8": chain_ok},
+        "people": [{"id": p, "name": spec.get("name", p), "title": spec.get("title", ""), "kind": spec.get("kind"),
+                    "limit_cents": spec.get("limit"), "capabilities": sorted(spec["capabilities"])}
+                   for p, spec in world.wp.principals.items() if p != "seed"],
+        "evidence_docs": len(getattr(getattr(world, "evidence", None), "docs", {}) or {}),
+    }

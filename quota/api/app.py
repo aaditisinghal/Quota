@@ -138,6 +138,12 @@ def create_app(session, runs_dir="runs", static_dir=STATIC) -> FastAPI:
         with session.lock:
             return views.health(session.world)
 
+    @app.get("/architecture")
+    def architecture():
+        """Live counts for the How it works page (read-only)."""
+        with session.lock:
+            return views.architecture(session.world)
+
     @app.get("/today")
     def today():
         with session.lock:
