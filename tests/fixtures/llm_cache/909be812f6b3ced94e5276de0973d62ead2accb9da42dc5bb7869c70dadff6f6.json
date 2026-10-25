@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": false,
-    "promised_by": "devon.garza",
+    "promised_by": "zane.underwood",
     "quote": "",
     "to_customer": true,
     "type": "none"
   },
-  "prompt": "Kind: email\nFrom: devon.garza\nTo: elena@cobalt-travel.example\nAccount: Cobalt Travel\nSubject: Re: next steps\n\nHi Elena,\n\nWe'll walk you through the analytics module in a free demo.\n\nBest,\nDevon",
+  "prompt": "Kind: email\nFrom: zane.underwood\nTo: nico@juniper-energy.example\nAccount: Juniper Energy\nSubject: Re: next steps\n\nHi Nico,\n\nCredits apply only per the SLA schedule in the contract.\n\nBest,\nZane",
   "schema": {
     "additionalProperties": false,
     "properties": {

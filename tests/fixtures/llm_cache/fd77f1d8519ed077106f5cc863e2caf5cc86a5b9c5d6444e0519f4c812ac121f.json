@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": true,
-    "promised_by": "noel.kowalski",
-    "quote": "I'll get you three months on the house after go-live.",
+    "promised_by": "sage.tanaka",
+    "quote": "If it isn't working by Q3, we'll just let you out.",
     "to_customer": true,
-    "type": "free_period"
+    "type": "early_exit"
   },
-  "prompt": "Kind: email\nFrom: noel.kowalski\nTo: ana@willow-robotics.example\nAccount: Willow Robotics\nSubject: Re: order form\n\nHi Ana,\n\nI'll get you three months on the house after go-live. Just don't put it in the order form.\n\nBest,\nNoel",
+  "prompt": "Kind: email\nFrom: sage.tanaka\nTo: tomas@juniper-studios.example\nAccount: Juniper Studios\nSubject: Re: rollout plan\n\nHi Tomas,\n\nDon't stress about year two. If it isn't working by Q3, we'll just let you out.\n\nBest,\nSage",
   "schema": {
     "additionalProperties": false,
     "properties": {

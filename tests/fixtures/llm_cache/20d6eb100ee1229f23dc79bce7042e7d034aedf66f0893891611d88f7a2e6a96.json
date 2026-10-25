@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": false,
-    "promised_by": "uma.kowalski",
+    "promised_by": "wren.holt",
     "quote": "",
     "to_customer": true,
     "type": "none"
   },
-  "prompt": "Kind: email\nFrom: uma.kowalski\nTo: maya@pinecrest-energy.example\nAccount: Pinecrest Energy\nSubject: Re: order form\n\nHi Maya,\n\nCan you pay the invoice within 30 days?\n\nBest,\nUma",
+  "prompt": "Kind: email\nFrom: wren.holt\nTo: wes@cobalt-foods.example\nAccount: Cobalt Foods\nSubject: Re: next steps\n\nHi Wes,\n\nWe'll walk you through the analytics module in a free demo.\n\nBest,\nWren",
   "schema": {
     "additionalProperties": false,
     "properties": {

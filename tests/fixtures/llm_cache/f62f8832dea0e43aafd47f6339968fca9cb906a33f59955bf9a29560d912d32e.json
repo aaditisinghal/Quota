@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": true,
-    "promised_by": "wren.holt",
-    "quote": "Whatever happens at renewal, you'll stay at this year's number. You have my word.",
+    "is_commitment": false,
+    "promised_by": "zane.underwood",
+    "quote": "",
     "to_customer": true,
-    "type": "price_lock"
+    "type": "none"
   },
-  "prompt": "Kind: email\nFrom: wren.holt\nTo: zoe@cobalt-foods.example\nAccount: Cobalt Foods\nSubject: Re: next steps\n\nHi Zoe,\n\nWhatever happens at renewal, you'll stay at this year's number. You have my word.\n\nBest,\nWren",
+  "prompt": "Kind: email\nFrom: zane.underwood\nTo: rosa@meridian-freight.example\nAccount: Meridian Freight\nSubject: Re: rollout plan\n\nHi Rosa,\n\nWe never waive fees without an amendment signed by finance.\n\nBest,\nZane",
   "schema": {
     "additionalProperties": false,
     "properties": {

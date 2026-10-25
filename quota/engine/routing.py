@@ -5,7 +5,8 @@ from quota import config
 OWNERS = {"plan_exception": "marcus.lee", "journal_entry": "priya.nair", "payroll_file": "priya.nair",
           # Phase 3: who answers questions that are not approvals
           "territory": "marcus.lee", "splits": "marcus.lee", "plan_config": "marcus.lee",
-          "material_flag": "priya.nair", "payroll_release": "dana.ortiz"}
+          "material_flag": "priya.nair", "payroll_release": "dana.ortiz",
+          "commitment_review": "priya.nair"}       # ELASTIC_TASKS E5: is an off-contract promise binding?
 # Backup approvers (SPEC "Who it asks"): unanswered for 2 business days, or the approver is away.
 ESCALATION = {"marcus.lee": "priya.nair", "priya.nair": "grace.liu", "grace.liu": None}
 

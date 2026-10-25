@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": true,
-    "promised_by": "oakley.foster",
-    "quote": "Pay the first invoice whenever finance gets to it. 120 days is fine on our side.",
+    "is_commitment": false,
+    "promised_by": "indira.duarte",
+    "quote": "",
     "to_customer": true,
-    "type": "payment_terms"
+    "type": "none"
   },
-  "prompt": "Kind: email\nFrom: oakley.foster\nTo: dev@onyx-textiles.example\nAccount: Onyx Textiles\nSubject: Following up\n\nHi Dev,\n\nPay the first invoice whenever finance gets to it. 120 days is fine on our side.\n\nBest,\nOakley",
+  "prompt": "Kind: email\nFrom: indira.duarte\nTo: jamal@onyx-foods.example\nAccount: Onyx Foods\nSubject: Following up\n\nHi Jamal,\n\nOur standard order form already includes termination for convenience in the first 90 days.\n\nBest,\nIndira",
   "schema": {
     "additionalProperties": false,
     "properties": {

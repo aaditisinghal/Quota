@@ -4,7 +4,7 @@
     "is_commitment": true,
     "promised_by": "uma.kowalski",
     "quote": "Told Northwind they can cancel anytime in the first quarter",
-    "to_customer": true,
+    "to_customer": false,
     "type": "early_exit"
   },
   "prompt": "Kind: slack\nFrom: uma.kowalski\nTo: morgan.diaz\nAccount: Northwind Dental\nSubject: \n\nTold Northwind they can cancel anytime in the first quarter, needed it to close.",

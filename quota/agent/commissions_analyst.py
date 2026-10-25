@@ -229,6 +229,11 @@ class CommissionsAnalyst(Seat):
                                                 f"it count?")]))
         for rep, key, calc in ctx.calc:
             decision_ids.append(self.record_calc(ctx.data["rows"][rep], key.split("+")[0], rep, calc, key=key)[0])
+        # ELASTIC_TASKS E5: at booking, look for a promise the contract does not make (once per deal booked).
+        for deal_id in sorted({key.split("+")[0] for _, key, _ in ctx.calc}):
+            gated = self.commitment_gate(deal_id)
+            if gated:
+                decision_ids.append(gated)
         return decision_ids
 
     # ---------- message.posted ----------
@@ -779,6 +784,8 @@ class CommissionsAnalyst(Seat):
         """Lines a hold decision has taken out of payroll: deals on collection hold (until the customer pays) and
         lines the signed plan does not pay after a termination."""
         held = set()
+        for deal_id in self.commitment_holds():
+            held |= {l["id"] for l in self.lines(deal_id=deal_id)}
         for decision in self.decisions(kind="collection_hold"):
             if not queries.collected(self.ro, decision["subject_id"], self.now):
                 held |= {l["id"] for l in self.lines(deal_id=decision["subject_id"])}
@@ -835,8 +842,18 @@ class CommissionsAnalyst(Seat):
         return []
 
     def write_payroll_file(self, ctx):
+        # ELASTIC_TASKS E5: the last look before money moves. A promise found now holds the deal's lines (and any
+        # recovery netted against them stays in 1290 for the next run).
+        gated = [d for d in (self.commitment_gate(deal_id) for deal_id in
+                             sorted({self.get("commission_lines", lid)["deal_id"] for lid in ctx.res
+                                     if self.get("commission_lines", lid)["amount_cents"] > 0})) if d]
+        holds = self.commitment_holds()
+        if holds:
+            reps = {l["rep_id"] for lid in ctx.res for l in [self.get("commission_lines", lid)] if l["deal_id"] in holds}
+            ctx.res = [lid for lid in ctx.res for l in [self.get("commission_lines", lid)]
+                       if l["deal_id"] not in holds and not (l["amount_cents"] < 0 and l["rep_id"] in reps)]
         if not ctx.res:
-            return []
+            return gated
         file_id = self.wp.create_payroll_file(self.principal, ctx.event.payload["period"], ctx.res)
         total = self.get("payroll_files", file_id)["total_cents"]
         self.emit("PAYROLL", f"{file_id} created: {fmt_usd(total)} ({', '.join(ctx.res)})")
@@ -859,7 +876,94 @@ class CommissionsAnalyst(Seat):
                 note.append("still due in 1290 (no commission to net it against yet): " + ", ".join(
                     f"{l['id']} {config.display_name(l['rep_id'])} {fmt_usd(-l['amount_cents'])}" for l in left))
             self.send(routing.owner("payroll_release"), f"{file_id} recoveries: " + "; ".join(note) + ".")
-        return []
+        return gated
+
+    # ---------- ELASTIC_TASKS E5: the off-contract promise gate ----------
+
+    def commitment_holds(self) -> dict[str, dict]:
+        """deal -> the commitment_check holding it: the deal's latest check held it, and nobody has since said
+        the promise is not binding (its commitment_review approved) nor has a re-check found it covered."""
+        latest = {}
+        for d in self.decisions(kind="commitment_check"):
+            latest[d["subject_id"]] = d
+        out = {}
+        for deal_id, d in latest.items():
+            if d["outcome"] != "held":
+                continue
+            review = queries.fetch_one(self.ro, "SELECT id FROM approvals WHERE kind = 'commitment_review' AND "
+                                                "subject_id = ? ORDER BY id", (d["id"],))
+            if review and queries.satisfied_approval(self.ro, "commitment_review", d["id"], self.now):
+                continue
+            out[deal_id] = d
+        return out
+
+    def commitment_gate(self, deal_id) -> str | None:
+        """Search the deal's messages since 30 days before booking for each promise intent, read the hits, and
+        hold the deal's commission on any promise the signed contract does not make. Returns the decision id
+        when it recorded one (a new hold, or a release when a re-check finds the contract now covers it)."""
+        evidence = getattr(self.world, "evidence", None)
+        if evidence is None:
+            return None
+        from quota.agent import commitments
+        from quota.search.intents import INTENTS, merge
+        deal = self.get("deals", deal_id)
+        found = queries.fetch_one(self.ro, "SELECT id FROM contracts WHERE deal_id = ? AND known_at <= ? "
+                                           "ORDER BY version DESC LIMIT 1", (deal_id, self.now))
+        contract = self.get("contracts", found["id"]) if found else None
+        if deal is None or contract is None or not contract["countersigned_at"]:
+            return None
+        after = clk.add_days(contract["countersigned_at"], -30)
+        if hasattr(evidence, "account_messages"):        # offline: read the account's whole mailbox
+            hits = evidence.account_messages(deal["account"], after=after, before=self.now)
+        else:                                             # Elastic: hybrid + rerank, every intent, top 5 each
+            hits = merge({intent: evidence.search(text, "hybrid", k=5, account=deal["account"], after=after,
+                                                  before=self.now) for intent, text in INTENTS.items()})
+        findings = [f for f in (commitments.classify(h, contract, self.world.commitment_llm) for h in hits) if f]
+        previous = self.decisions(kind="commitment_check", subject_id=deal_id)
+        last = previous[-1] if previous else None
+        rows = {"deals": [deal], "contracts": [contract]}
+        if not findings:
+            return None
+        output = checks.check_commitments(rows, deal_id, findings)
+        held = output["result"]["held"]
+        same = last is not None and sorted(json.loads(last["output_json"])["result"]["open"]) == \
+            sorted(output["result"]["open"]) and last["outcome"] == ("held" if held else "posted")
+        if same or (not held and (last is None or last["outcome"] != "held")):
+            return None                    # nothing new: the hold stands, or there was never one to release
+        refs = queries.input_refs(rows) + [
+            {"table": "quota-comms", "id": f["doc_id"], "version": 1, "sha256": f["body_sha256"],
+             "rank": f["retrieval"]["rank"], "mode": f["retrieval"]["mode"]} for f in findings]
+        lines = [l for l in self.lines(deal_id=deal_id) if l["amount_cents"] > 0
+                 and self.line_status(l["id"]) not in ("superseded", "clawed_back", "paid")]
+        amount = sum(l["amount_cents"] for l in lines)
+        if not held:
+            text = f"the signed contract for {deal['account']} now gives what was promised; commission released"
+            decision_id = self.wp.record_decision(self.principal, "commitment_check", deal_id, refs, {}, [], output,
+                                                  "posted", text)
+            self.emit("DECISION", f"{decision_id} commitment_check {deal_id}: {text}")
+            return decision_id
+        first = next(f for f in findings if f["doc_id"] in output["result"]["open"])
+        who = config.display_name(first["promised_by"]) if first["promised_by"] in config.PRINCIPALS else first["promised_by"]
+        text = (f"OFF_CONTRACT_COMMITMENT: {who} wrote \"{first['quote']}\" ({first['doc_id']}, {first['sent_at']}, "
+                f"found by {first['retrieval']['mode']} #{first['retrieval']['rank']}); the signed contract has no "
+                f"such term ({first['type']}). {fmt_usd(amount)} held" + (f"; {len(findings) - 1} more message(s)"
+                                                                         if len(findings) > 1 else ""))
+        decision_id = self.wp.record_decision(self.principal, "commitment_check", deal_id, refs, {}, [], output,
+                                              "held", text)
+        self.emit("DECISION", f"{decision_id} commitment_check {deal_id}: {text}")
+        controller, vp = routing.owner("commitment_review"), routing.owner("splits")
+        approval_id = self.wp.request_approval(self.principal, "commitment_review", decision_id, amount,
+                                               approver=controller)
+        self.emit("APPROVAL", f"{approval_id} commitment_review {decision_id} {fmt_usd(amount)} -> {controller}")
+        self.send(controller, f"{deal['account']}: the customer may hold terms outside the contract; the revenue "
+                              f"schedule may need review. {who} wrote \"{first['quote']}\" ({first['doc_id']}). "
+                              f"{fmt_usd(amount)} of commission is held ({decision_id}). Approve {approval_id} if "
+                              f"it is not binding; if it is, amend the contract and I will release it on the next "
+                              f"check.")
+        self.send(vp, f"Rep conduct: {who} promised {deal['account']} terms that are not in the signed contract "
+                      f"(\"{first['quote']}\", {first['doc_id']}). The commission is held pending the Controller "
+                      f"({decision_id}).")
+        return decision_id
 
     # ---------- job.due approver_digest / approval_followup ----------
 
@@ -1111,8 +1215,15 @@ class CommissionsAnalyst(Seat):
     def final_pay(self, rep, end_date, eligible) -> None:
         """Scope, Payroll: a same-day payout request for a departing rep's earned, approved commission, so final
         pay is on time. What is earned but not yet approved follows in the regular cycle once approved."""
-        ready = [l for l in eligible if self.line_status(l) == "approved" and l not in self.in_open_payroll()]
+        # A final-pay file honours every hold a regular one does (an off-contract promise, a collection hold).
+        held = self.payroll_held()
+        ready = [l for l in eligible if self.line_status(l) == "approved" and l not in self.in_open_payroll()
+                 and l not in held]
         waiting = [l for l in eligible if self.line_status(l) == "draft"]
+        if [l for l in eligible if l in held]:
+            self.send(routing.owner("payroll_release"),
+                      f"Final pay for {config.display_name(rep)} (left {end_date}) leaves out "
+                      f"{', '.join(l for l in eligible if l in held)}: held pending the Controller.")
         if not ready:
             if waiting:
                 self.send(routing.owner("payroll_release"),

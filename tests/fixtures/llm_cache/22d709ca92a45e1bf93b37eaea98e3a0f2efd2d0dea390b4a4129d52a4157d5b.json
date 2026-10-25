@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": false,
-    "promised_by": "zane.underwood",
-    "quote": "",
+    "is_commitment": true,
+    "promised_by": "alex.chen",
+    "quote": "If the rollout slips past June your team can walk away, no charge.",
     "to_customer": true,
-    "type": "none"
+    "type": "early_exit"
   },
-  "prompt": "Kind: email\nFrom: zane.underwood\nTo: dev@driftwood-media.example\nAccount: Driftwood Media\nSubject: Following up\n\nHi Dev,\n\nIf adoption stalls, let's set up a success plan call.\n\nBest,\nZane",
+  "prompt": "Kind: email\nFrom: alex.chen\nTo: nico@driftwood-ventures.example\nAccount: Driftwood Ventures\nSubject: Re: rollout plan\n\nHi Nico,\n\nIf the rollout slips past June your team can walk away, no charge. I'll sort it with legal later.\n\nBest,\nAlex",
   "schema": {
     "additionalProperties": false,
     "properties": {

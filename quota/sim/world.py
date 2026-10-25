@@ -199,6 +199,8 @@ class World:
         self.records = RecordsSystem(self)
         self.billing = BillingSystem(self, stripe)
         self.seats = []          # drained in this order at every instant, after records and billing
+        self.evidence = None     # ELASTIC_TASKS E5: an EvidenceSearch over sales messages turns the payout gate on
+        self.commitment_llm = None   # the model that reads a message for promises (None: the rule reader)
         self.people = None
         self.strict = True       # tests and the CLI fail loudly; a served world contains a failing event instead
 

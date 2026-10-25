@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": true,
-    "promised_by": "sage.tanaka",
-    "quote": "Throw in the analytics module for free, we'll just not bill it.",
+    "promised_by": "taylor.brooks",
+    "quote": "We'll credit you $15,000 against the first invoice as discussed.",
     "to_customer": true,
-    "type": "free_addon"
+    "type": "credit"
   },
-  "prompt": "Kind: email\nFrom: sage.tanaka\nTo: priyanka@harbor-robotics.example\nAccount: Harbor Robotics\nSubject: Re: next steps\n\nHi Priyanka,\n\nThrow in the analytics module for free, we'll just not bill it.\n\nBest,\nSage",
+  "prompt": "Kind: email\nFrom: taylor.brooks\nTo: xin@amber-studios.example\nAccount: Amber Studios\nSubject: Re: order form\n\nHi Xin,\n\nWe'll credit you $15,000 against the first invoice as discussed.\n\nBest,\nTaylor",
   "schema": {
     "additionalProperties": false,
     "properties": {

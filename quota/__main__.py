@@ -184,7 +184,7 @@ def cmd_serve(args) -> int:
         llm = LLM()
     print(f"Building the {args.world} world ...")
     if args.world == "acme":
-        session = sessions.acme_session("live" if args.live else "scripted", llm, stripe)
+        session = sessions.acme_session("live" if args.live else "scripted", llm, stripe, evidence=True)
     else:
         session = sessions.fernhill_session(args.seed, args.reps, stripe)
     if args.from_inbox:

@@ -219,7 +219,8 @@ def test_scenario_menu_and_runs_through_the_api(cp_dir):
     try:
         menu = client.get("/api/scenarios").json()
         assert [m["name"] for m in menu] == ["birch_churns", "tz_acme", "morgan_approves", "jordan_quits",
-                                             "approve_yourself", "impersonation", "priya_rejects", "short_pay_98"]
+                                             "approve_yourself", "impersonation", "priya_rejects", "side_letter_summit",
+                                             "short_pay_98"]
         assert set(menu[0]) == {"name", "phrase", "checkpoint", "expect"} and client.get("/scenarios").json() == menu
         ran = client.post("/api/scenarios/impersonation/run").json()
         assert ran["result"]["a_0002_pending"] and client.get("/state").json()["scenario"] == "impersonation"

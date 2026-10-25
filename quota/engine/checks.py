@@ -178,6 +178,20 @@ def check_short_pay(rows, deal_id, tolerance_bps) -> dict:
                        "paid_bps": paid_bps, "collected": paid > 0 and paid_bps >= tolerance_bps}}
 
 
+def check_commitments(rows, deal_id, findings) -> dict:
+    """ELASTIC_TASKS E5: a message promising the customer something the signed contract does not say holds the
+    deal's commission (OFF_CONTRACT_COMMITMENT). Replay re-applies the contract check to the stored findings."""
+    from quota.agent.commitments import covered
+    contract = latest_by_id(rows.get("contracts", [])).get(deal_id)
+    clauses = _loads(contract["clauses_json"]) if contract else {}
+    open_ = [f["doc_id"] for f in findings if not covered(f["type"], f["quote"], clauses)]
+    return {"fn": "check_commitments", "args": {"deal_id": deal_id, "findings": findings},
+            "result": {"held": bool(open_), "open": open_, "covered": [f["doc_id"] for f in findings
+                                                                      if f["doc_id"] not in open_],
+                       "reason_code": "OFF_CONTRACT_COMMITMENT" if open_ else None}}
+
+
 CHECKS = {fn.__name__: fn for fn in (check_splits, check_backdating, check_collection, check_termination,
                                      check_territory, check_plan_drift, check_resubmission, check_precedent_pattern,
-                                     check_no_rule, check_rep_exceptions, check_leave, check_short_pay)}
+                                     check_no_rule, check_rep_exceptions, check_leave, check_short_pay,
+                                     check_commitments)}

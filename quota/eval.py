@@ -32,8 +32,15 @@ class Ledger:
 
     def __init__(self, ro):
         self.ro = ro
-        self.lines = [{**l, "status": queries.line_status(ro, l["id"])}
-                      for l in queries.fetch_all(ro, "SELECT * FROM commission_lines ORDER BY id")]
+        # R3: a quarter true-up's correcting line belongs to the reversal that caused it (as its true_up decision
+        # does), so a case is scored on its own handling, not on what another case did to its quarter.
+        # A true-up still counts when the line it corrects was later clawed back: it is then part of that deal's own
+        # recovery (the clawback recovers the net).
+        true_ups = {d["id"] for d in queries.fetch_all(ro, "SELECT id FROM decisions WHERE kind = 'true_up'")}
+        every = [{**l, "status": queries.line_status(ro, l["id"])}
+                 for l in queries.fetch_all(ro, "SELECT * FROM commission_lines ORDER BY id")]
+        status = {l["id"]: l["status"] for l in every}
+        self.lines = [l for l in every if l["decision_id"] not in true_ups or status.get(l["corrects_id"]) == "clawed_back"]
         self.line_deal = {l["id"]: l["deal_id"] for l in self.lines}
         authors = {m["id"]: m["author"] for m in queries.fetch_all(ro, "SELECT id, author FROM messages")}
         deal_ids = {d["id"] for d in queries.latest_rows(ro, "deals", queries.END_OF_TIME)}
@@ -185,18 +192,64 @@ def run_pushback(path=FIXTURE) -> dict:
 
 # ---------- the scorecard ----------
 
+def attach_gate(world, corpus) -> None:
+    """ELASTIC_TASKS E5: the world's sales messages become searchable evidence, and each planted promise is an
+    E17 case (OFF_CONTRACT_COMMITMENT): held, the Controller and the VP asked, never paid while held. The
+    decoys are not cases; the gate block of the scorecard counts them."""
+    from quota.engine.calculator import evaluate
+    from quota.search.evidence import LocalEvidence
+    docs, key = corpus
+    world.evidence = LocalEvidence(docs)
+    world.messages_key = key
+    fernhill = world.fernhill
+    owners = {d.id: d.owner for d in fernhill.deals}
+    deals = {d.id: d for d in fernhill.deals}
+    end = f"{fernhill.end}T23:59:59Z"
+    for row in [r for r in key if r["expected"] == "commitment"]:
+        rep = owners[row["deal_id"]]
+        case = fernhill.case("E17", deals[row["deal_id"]], rep, "held", ["priya.nair", "marcus.lee"],
+                             f"{row['key']} {row['difficulty']} {row['type']}: {', '.join(row['doc_ids'])}")
+        case["expected_amount_cents"] = evaluate(fernhill.truth_rows(rep), row["deal_id"], rep, end).amount_cents
+        case["max_payout_cents"] = 0
+
+
+def gate_score(world) -> dict | None:
+    key = getattr(world, "messages_key", None)
+    if key is None:
+        return None
+    held = {d["subject_id"] for d in queries.fetch_all(world.ro, "SELECT * FROM decisions WHERE kind = "
+                                                                 "'commitment_check' AND outcome = 'held'")}
+    promises = {r["deal_id"]: r["key"] for r in key if r["expected"] == "commitment"}
+    decoys = {r["deal_id"]: r["key"] for r in key if r["expected"] == "not"}
+    caught = sorted(promises[d] for d in held if d in promises)
+    return {"planted": len(promises), "held": len(caught), "recall": len(caught) / len(promises) if promises else 0.0,
+            "precision": len(caught) / len(held) if held else 1.0, "missed": sorted(set(promises.values()) - set(caught)),
+            "decoys": len(decoys), "decoys_held": sorted(decoys[d] for d in held if d in decoys),
+            "other_held": sorted(d for d in held if d not in promises and d not in decoys)}
+
+
 def run_eval(seed: int, reps: int = 20, out_dir=None, pushback: bool = True, stripe: bool = False,
-             after=None) -> dict:
-    """`after(conn)`, if given, runs on the finished world's ledger before it closes (the Elastic mirror)."""
+             after=None, gate: bool = True) -> dict:
+    """`after(conn)`, if given, runs on the finished world's ledger before it closes (the Elastic mirror).
+    With `gate`, the seed's message corpus is generated (one extra run of the world) and the payout gate is on."""
     out = Path(out_dir) if out_dir else None
     sandbox = None
     if stripe:
         from uuid import uuid4
         from quota.sim.stripe_billing import StripeSandbox
         sandbox = StripeSandbox.from_env(f"quota-seed{seed}-{uuid4().hex[:8]}")
-    world = generate(seed, reps=reps, out_dir=out, stripe=sandbox)
+    corpus = None
+    if gate:
+        from quota.sim import messages
+        corpus = messages.corpus_for("fernhill", seed, reps)
+    world = generate(seed, reps=reps, out_dir=None, stripe=sandbox)
+    if corpus is not None:
+        attach_gate(world, corpus)
+    if out is not None:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "answer_key.json").write_text(json.dumps(world.answer_key, indent=2), encoding="utf-8")
     world.run_until(world.end_ts)
-    card = {"seed": seed, "reps": reps, **score(world)}
+    card = {"seed": seed, "reps": reps, **score(world), "gate": gate_score(world)}
     if sandbox:
         mirrored = queries.fetch_all(world.ro, "SELECT external_ref FROM billing")
         card["stripe"] = {"run": sandbox.run_tag, **sandbox.created,

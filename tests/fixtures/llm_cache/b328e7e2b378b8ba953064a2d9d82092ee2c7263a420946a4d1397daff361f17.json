@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": true,
-    "promised_by": "devon.garza",
-    "quote": "We'll credit you $15,000 against the first invoice as discussed.",
+    "is_commitment": false,
+    "promised_by": "uma.kowalski",
+    "quote": "",
     "to_customer": true,
-    "type": "credit"
+    "type": "none"
   },
-  "prompt": "Kind: email\nFrom: devon.garza\nTo: ben@willow-studios.example\nAccount: Willow Studios\nSubject: Re: order form\n\nHi Ben,\n\nWe'll credit you $15,000 against the first invoice as discussed.\n\nBest,\nDevon",
+  "prompt": "Kind: email\nFrom: uma.kowalski\nTo: lars@granite-travel.example\nAccount: Granite Travel\nSubject: Re: next steps\n\nHi Lars,\n\nI can't offer free months; that would need a signed amendment.\n\nBest,\nUma",
   "schema": {
     "additionalProperties": false,
     "properties": {

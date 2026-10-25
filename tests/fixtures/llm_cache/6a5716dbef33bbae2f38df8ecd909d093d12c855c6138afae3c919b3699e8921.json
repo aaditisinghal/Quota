@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": false,
-    "promised_by": "gray.jensen",
+    "promised_by": "oakley.vasquez",
     "quote": "",
     "to_customer": true,
     "type": "none"
   },
-  "prompt": "Kind: email\nFrom: gray.jensen\nTo: sam@granite-freight.example\nAccount: Granite Freight\nSubject: Re: order form\n\nHi Sam,\n\nCredits apply only per the SLA schedule in the contract.\n\nBest,\nGray",
+  "prompt": "Kind: email\nFrom: oakley.vasquez\nTo: ben@quarry-health.example\nAccount: Quarry Health\nSubject: Following up\n\nHi Ben,\n\nCancellation terms are in section 9 of the MSA.\n\nBest,\nOakley",
   "schema": {
     "additionalProperties": false,
     "properties": {

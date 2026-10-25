@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": false,
-    "promised_by": "devon.garza",
-    "quote": "",
+    "is_commitment": true,
+    "promised_by": "uma.kowalski",
+    "quote": "Si no funciona en 60 d\u00edas, cancelan sin costo.",
     "to_customer": true,
-    "type": "none"
+    "type": "early_exit"
   },
-  "prompt": "Kind: email\nFrom: devon.garza\nTo: jamal@fjord-health.example\nAccount: Fjord Health\nSubject: Re: next steps\n\nHi Jamal,\n\nYour renewal price is set by the 5% cap in section 7.\n\nBest,\nDevon",
+  "prompt": "Kind: email\nFrom: uma.kowalski\nTo: yusuf@redwood-dental.example\nAccount: Redwood Dental\nSubject: Re: pr\u00f3ximos pasos\n\nHola Yusuf,\n\nSi no funciona en 60 d\u00edas, cancelan sin costo. Lo dejamos entre nosotros.\n\nSaludos,\nUma",
   "schema": {
     "additionalProperties": false,
     "properties": {

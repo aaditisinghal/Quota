@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": false,
-    "promised_by": "riley.shah",
+    "promised_by": "devon.garza",
     "quote": "",
     "to_customer": true,
     "type": "none"
   },
-  "prompt": "Kind: email\nFrom: riley.shah\nTo: yusuf@tidal-logistics.example\nAccount: Tidal Logistics\nSubject: Re: rollout plan\n\nHi Yusuf,\n\nLet's ask legal whether an exit clause is possible.\n\nBest,\nRiley",
+  "prompt": "Kind: email\nFrom: devon.garza\nTo: uli@fjord-health.example\nAccount: Fjord Health\nSubject: Following up\n\nHi Uli,\n\nYour renewal price is set by the 5% cap in section 7.\n\nBest,\nDevon",
   "schema": {
     "additionalProperties": false,
     "properties": {

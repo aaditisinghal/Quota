@@ -51,7 +51,9 @@ def card():
 
 
 def test_seed_7_scorecard(card):
-    assert card["planted"] == 40
+    assert card["planted"] == 52                          # 40 cases plus the 12 E17 promises (ELASTIC_TASKS E5)
+    assert card["gate"] == {"planted": 12, "held": 12, "recall": 1.0, "precision": 1.0, "missed": [], "decoys": 12,
+                            "decoys_held": [], "other_held": []}
     assert card["misses"] == [], [(m["case_id"], m["got_outcome"], m["got_amount_cents"]) for m in card["misses"]]
     assert card["false_flags"] == 0 and card["wrong_automatic_payouts"] == 0
     assert card["replay_match"] == 1.0
@@ -81,7 +83,7 @@ def test_scorecard_prints_the_section_13_lines(card):
 def test_cli_writes_the_answer_key_and_scorecard(tmp_path, capsys):
     assert main(["eval", "--seed", "3", "--reps", "16", "--out", str(tmp_path)]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("planted cases: 40")
+    assert out.startswith("planted cases: 52 | correct (outcome AND amount): 52")      # 40 + 12 E17 (E5)
     key = json.loads((tmp_path / "seed-3" / "answer_key.json").read_text())
     scorecard = json.loads((tmp_path / "seed-3" / "scorecard.json").read_text())
-    assert len(key) == 40 and scorecard["seed"] == 3 and scorecard["pushback"]["valid"] == 10
+    assert len(key) == 52 and scorecard["seed"] == 3 and scorecard["pushback"]["valid"] == 10

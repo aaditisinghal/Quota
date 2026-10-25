@@ -60,6 +60,7 @@ DECOYS = [
 ]
 INTERNAL = {"P10", "D11"}
 CONTRACT_KEY = {"early_exit": "termination_for_convenience", "price_lock": "price_increase_cap"}
+MOVES_QUARTER = {"E04", "E08", "E12", "E15"}      # backdating, churn clawback, amendment, void
 
 # ---------- noise: (subject, customer opener, rep reply, customer follow-up) and internal Slack lines ----------
 
@@ -173,9 +174,22 @@ class Corpus:
         self.people = {p["id"]: p for p in queries.latest_rows(self.ro, "people", queries.END_OF_TIME)}
         self.deals = [deals[i] for i in sorted(contracts) if i in deals and deals[i]["stage"] == "closed_won"]
         self.contracts = contracts
-        self.used = set(getattr(getattr(world, "fernhill", None), "used_deals", set()))
+        fernhill = getattr(world, "fernhill", None)
+        self.used = set(getattr(fernhill, "used_deals", set()))
+        # Planted cases that reverse or re-book a deal move the rest of that rep's quarter (R3 true-ups), so a
+        # promise is never put in such a quarter: the payout gate is then measured on its own.
+        self.moved = set()
+        if fernhill is not None:
+            from quota.engine.calculator import quarter_of
+            booked = {d.id: (d.owner, quarter_of(d.booked_at)) for d in fernhill.deals}
+            self.moved = {booked[c["deal_id"]] for c in fernhill.answer_key
+                          if c["type"] in MOVES_QUARTER and c.get("deal_id") in booked}
+            self.quarter = booked
         self.messages: list[dict] = []
         self.thread = 0
+
+    def quarter_of(self, deal_id):
+        return getattr(self, "quarter", {}).get(deal_id)
 
     def first_name(self, principal) -> str:
         return config.display_name(principal).split()[0] if principal in self.people else principal
@@ -253,17 +267,19 @@ def generate_messages(world, seed, plant=True) -> tuple[list[dict], list[dict]]:
         covered = {name: [d for d in free if name in corpus.clauses(d["id"])]
                    for name in ("termination_for_convenience", "price_increase_cap")}
         plain = [d for d in free if not set(corpus.clauses(d["id"])) & set(CONTRACT_KEY.values())]
+        steady = [d for d in plain if corpus.quarter_of(d["id"]) not in corpus.moved]    # promises go here
         northwind = [d for d in plain if d["account"].startswith("Northwind")]
+        northwind_steady = [d for d in northwind if d in steady] or northwind
         taken: set[str] = set()
 
         def take(pool):
             deal = rng.choice([d for d in pool if d["id"] not in taken])
             taken.add(deal["id"])
             return deal
-        chosen = {"P10": take(northwind), "D11": take(northwind) if len(northwind) > 1 else None,
+        chosen = {"P10": take(northwind_steady), "D11": take(northwind) if len(northwind) > 1 else None,
                   "D01": take(covered["termination_for_convenience"]), "D04": take(covered["price_increase_cap"])}
         for k, kind, difficulty, lang, text in PROMISES:
-            deal = chosen.get(k) or take(plain)
+            deal = chosen.get(k) or take(steady)
             msgs = corpus.plant(k, text, deal, lang, question=P09_QUESTION if k == "P09" else None,
                                 internal=k in INTERNAL)
             key.append({"key": k, "messages": msgs, "deal_id": deal["id"], "account": deal["account"], "type": kind,
@@ -307,10 +323,10 @@ def world_for(name, seed, reps=20):
     return demo.world
 
 
-def corpus_for(name, seed) -> tuple[list[dict], list[dict]]:
+def corpus_for(name, seed, reps=20) -> tuple[list[dict], list[dict]]:
     """Fernhill gets the planted promises and decoys; the Acme story gets noise only (its one side letter is
     the scenario side_letter_summit's to inject)."""
-    world = world_for(name, seed)
+    world = world_for(name, seed, reps)
     try:
         return generate_messages(world, seed, plant=name == "fernhill")
     finally:

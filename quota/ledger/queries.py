@@ -64,7 +64,14 @@ def input_ref(table: str, row: dict) -> dict:
     return {"table": table, "id": row["id"], "version": row.get("version"), "sha256": row_sha(row)}
 
 
+# Inputs that live outside the ledger (ELASTIC_TASKS E5: a message in quota-comms). The decision records the
+# message's body hash and the finding it used; replay uses the stored finding and never searches again.
+EXTERNAL_TABLES = {"quota-comms"}
+
+
 def load_input(conn, ref: dict) -> dict | None:
+    if ref["table"] in EXTERNAL_TABLES:
+        return None
     if ref.get("version") is not None:
         return fetch_one(conn, f"SELECT * FROM {ref['table']} WHERE id = ? AND version = ?",
                          (ref["id"], ref["version"]))
@@ -269,6 +276,8 @@ def replay_decision(conn, decision_id) -> tuple[bool, dict, dict]:
     stored = json.loads(decision["output_json"])
     rows: dict[str, list[dict]] = {}
     for ref in json.loads(decision["inputs_json"]):
+        if ref["table"] in EXTERNAL_TABLES:
+            continue
         row = load_input(conn, ref)
         if row is None or row_sha(row) != ref["sha256"]:
             return False, stored, {"error": f"input {ref['table']}:{ref['id']} v{ref.get('version')} "

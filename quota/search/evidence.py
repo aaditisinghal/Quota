@@ -53,6 +53,15 @@ class LocalEvidence:
     def get(self, doc_id) -> dict | None:
         return self.docs.get(doc_id)
 
+    def account_messages(self, account, after=None, before=None) -> list[dict]:
+        """Every message on one account in the window, oldest first. Keyword ranking cannot find a promise that
+        shares no words with any intent (a paraphrase, another language, "Consider it done."), so the offline
+        gate reads the account's whole mailbox (about a dozen messages a deal) instead of a top-k."""
+        docs = sorted((m for m in self.docs.values() if m["account"] == account
+                       and (after is None or m["sent_at"] >= after) and (before is None or m["sent_at"] <= before)),
+                      key=lambda m: (m["sent_at"], m["doc_id"]))
+        return [_hit(m, 0.0, rank, "local_scan") for rank, m in enumerate(docs, 1)]
+
     @staticmethod
     def match(query: str) -> str:
         words = [w for w in re.findall(r"\w+", query.lower()) if w not in STOP]

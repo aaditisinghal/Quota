@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": false,
-    "promised_by": "indira.duarte",
-    "quote": "",
+    "is_commitment": true,
+    "promised_by": "gray.holt",
+    "quote": "you can terminate after 60 days with a full refund if adoption stalls.",
     "to_customer": true,
-    "type": "none"
+    "type": "early_exit"
   },
-  "prompt": "Kind: email\nFrom: indira.duarte\nTo: sam@onyx-foods.example\nAccount: Onyx Foods\nSubject: Re: next steps\n\nHi Sam,\n\nOur standard order form already includes termination for convenience in the first 90 days.\n\nBest,\nIndira",
+  "prompt": "Kind: email\nFrom: gray.holt\nTo: hugo@umber-studios.example\nAccount: Umber Studios\nSubject: Re: next steps\n\nHi Hugo,\n\nConfirming what we discussed: you can terminate after 60 days with a full refund if adoption stalls.\n\nBest,\nGray",
   "schema": {
     "additionalProperties": false,
     "properties": {

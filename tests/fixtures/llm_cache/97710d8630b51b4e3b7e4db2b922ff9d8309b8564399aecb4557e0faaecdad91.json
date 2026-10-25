@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": true,
-    "promised_by": "riley.shah",
-    "quote": "Your price won't move for three years even though the paper says annual uplift.",
+    "promised_by": "logan.castillo",
+    "quote": "Pay the first invoice whenever finance gets to it. 120 days is fine on our side.",
     "to_customer": true,
-    "type": "price_lock"
+    "type": "payment_terms"
   },
-  "prompt": "Kind: email\nFrom: riley.shah\nTo: sam@redwood-freight.example\nAccount: Redwood Freight\nSubject: Re: order form\n\nHi Sam,\n\nYour price won't move for three years even though the paper says annual uplift.\n\nBest,\nRiley",
+  "prompt": "Kind: email\nFrom: logan.castillo\nTo: wes@juniper-textiles.example\nAccount: Juniper Textiles\nSubject: Following up\n\nHi Wes,\n\nPay the first invoice whenever finance gets to it. 120 days is fine on our side.\n\nBest,\nLogan",
   "schema": {
     "additionalProperties": false,
     "properties": {

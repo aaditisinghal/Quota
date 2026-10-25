@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": false,
-    "promised_by": "wren.holt",
-    "quote": "",
+    "is_commitment": true,
+    "promised_by": "uma.kowalski",
+    "quote": "I'll get you three months on the house after go-live.",
     "to_customer": true,
-    "type": "none"
+    "type": "free_period"
   },
-  "prompt": "Kind: email\nFrom: wren.holt\nTo: zoe@meridian-analytics.example\nAccount: Meridian Analytics\nSubject: Re: pr\u00f3ximos pasos\n\nHola Zoe,\n\nLos t\u00e9rminos de cancelaci\u00f3n est\u00e1n en la secci\u00f3n 9.\n\nSaludos,\nWren",
+  "prompt": "Kind: email\nFrom: uma.kowalski\nTo: dev@pinecrest-analytics.example\nAccount: Pinecrest Analytics\nSubject: Re: rollout plan\n\nHi Dev,\n\nI'll get you three months on the house after go-live. Just don't put it in the order form.\n\nBest,\nUma",
   "schema": {
     "additionalProperties": false,
     "properties": {

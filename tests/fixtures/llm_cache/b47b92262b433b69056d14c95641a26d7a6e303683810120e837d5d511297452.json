@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": true,
-    "promised_by": "jordan.kim",
-    "quote": "you can terminate after 60 days with a full refund if adoption stalls.",
+    "is_commitment": false,
+    "promised_by": "zane.whitfield",
+    "quote": "",
     "to_customer": true,
-    "type": "early_exit"
+    "type": "none"
   },
-  "prompt": "Kind: email\nFrom: jordan.kim\nTo: hugo@pinecrest-utilities.example\nAccount: Pinecrest Utilities\nSubject: Re: next steps\n\nHi Hugo,\n\nConfirming what we discussed: you can terminate after 60 days with a full refund if adoption stalls.\n\nBest,\nJordan",
+  "prompt": "Kind: email\nFrom: zane.whitfield\nTo: elena@onyx-retail.example\nAccount: Onyx Retail\nSubject: Re: order form\n\nHi Elena,\n\nLet's ask legal whether an exit clause is possible.\n\nBest,\nZane",
   "schema": {
     "additionalProperties": false,
     "properties": {

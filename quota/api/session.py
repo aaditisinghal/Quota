@@ -99,7 +99,17 @@ class Session:
         self.world.close()
 
 
-def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None, cast: bool = True) -> Session:
+def attach_evidence(world, extra=()) -> None:
+    """ELASTIC_TASKS E5: the served Acme world's sales messages (its own noise-only corpus) as evidence for the
+    payout gate, plus any messages a scenario adds."""
+    from quota.search.evidence import LocalEvidence
+    from quota.sim import messages
+    corpus, _ = messages.corpus_for("acme", 7)
+    world.evidence = LocalEvidence([*corpus, *extra])
+
+
+def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None, cast: bool = True,
+                 evidence: bool = False) -> Session:
     """Up to the pause the story is the scripted one in every mode; `live` then reads people's messages with
     the model and words the analyst's replies with it. `cast` adds SPEC's other named reps (Alex, Riley,
     Taylor) so the rehearsed judge phrases have someone to happen to."""
@@ -113,8 +123,10 @@ def acme_session(mode: str = "scripted", llm=None, stripe=None, db_path=None, ca
     world.queue.unschedule(INJECTED_BY_PEOPLE)
     later = [a for a in script["people"]["actions"] if a["at"] > ACME_START and a["do"] != "message"]
     world.people = PolicyPeople(world, later, ROUTINE_APPROVALS, releases=FINAL_PAY_RELEASES)
+    if evidence:
+        attach_evidence(world)
     session = Session(world, "acme", mode, llm,
-                      restart=lambda: acme_session(mode, llm, stripe, cast=cast).world)
+                      restart=lambda: acme_session(mode, llm, stripe, cast=cast, evidence=evidence).world)
     if mode == "live":
         session.analyst.extractor, session.analyst.llm = ModelExtractor(llm), llm
     else:

@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": false,
-    "promised_by": "uma.kowalski",
+    "promised_by": "gray.holt",
     "quote": "",
     "to_customer": true,
     "type": "none"
   },
-  "prompt": "Kind: email\nFrom: uma.kowalski\nTo: maya@granite-bakery.example\nAccount: Granite Bakery\nSubject: Re: next steps\n\nHi Maya,\n\nWe never waive fees without an amendment signed by finance.\n\nBest,\nUma",
+  "prompt": "Kind: email\nFrom: gray.holt\nTo: chloe@willow-travel.example\nAccount: Willow Travel\nSubject: Re: next steps\n\nHi Chloe,\n\nCan you pay the invoice within 30 days?\n\nBest,\nGray",
   "schema": {
     "additionalProperties": false,
     "properties": {

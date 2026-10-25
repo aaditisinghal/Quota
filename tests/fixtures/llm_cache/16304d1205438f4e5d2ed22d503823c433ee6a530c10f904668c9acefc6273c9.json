@@ -3,11 +3,11 @@
   "output": {
     "is_commitment": true,
     "promised_by": "zane.whitfield",
-    "quote": "Yes. Consider it done.",
+    "quote": "Your price won't move for three years even though the paper says annual uplift.",
     "to_customer": true,
-    "type": "early_exit"
+    "type": "price_lock"
   },
-  "prompt": "Kind: email\nFrom: zane.whitfield\nTo: keiko@kestrel-motors.example\nAccount: Kestrel Motors\nSubject: Re: Integration timeline\n\nHi Keiko,\n\nYes. Consider it done.\n\nBest,\nZane\n\n> Hi Zane,\n> \n> Can we get out if the integration isn't live by September?\n> \n> Thanks,\n> Keiko",
+  "prompt": "Kind: email\nFrom: zane.whitfield\nTo: sam@lumen-dental.example\nAccount: Lumen Dental\nSubject: Re: order form\n\nHi Sam,\n\nYour price won't move for three years even though the paper says annual uplift.\n\nBest,\nZane",
   "schema": {
     "additionalProperties": false,
     "properties": {

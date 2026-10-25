@@ -2,12 +2,12 @@
   "model": "claude-opus-5-5",
   "output": {
     "is_commitment": true,
-    "promised_by": "tatum.garza",
-    "quote": "If it isn't working by Q3, we'll just let you out.",
+    "promised_by": "alex.chen",
+    "quote": "Yes. Consider it done.",
     "to_customer": true,
     "type": "early_exit"
   },
-  "prompt": "Kind: email\nFrom: tatum.garza\nTo: keiko@onyx-utilities.example\nAccount: Onyx Utilities\nSubject: Re: rollout plan\n\nHi Keiko,\n\nDon't stress about year two. If it isn't working by Q3, we'll just let you out.\n\nBest,\nTatum",
+  "prompt": "Kind: email\nFrom: alex.chen\nTo: priyanka@cobalt-systems.example\nAccount: Cobalt Systems\nSubject: Re: Integration timeline\n\nHi Priyanka,\n\nYes. Consider it done.\n\nBest,\nAlex\n\n> Hi Alex,\n> \n> Can we get out if the integration isn't live by September?\n> \n> Thanks,\n> Priyanka",
   "schema": {
     "additionalProperties": false,
     "properties": {

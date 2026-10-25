@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": true,
-    "promised_by": "noel.kowalski",
-    "quote": "If the rollout slips past June your team can walk away, no charge.",
+    "is_commitment": false,
+    "promised_by": "wren.holt",
+    "quote": "",
     "to_customer": true,
-    "type": "early_exit"
+    "type": "none"
   },
-  "prompt": "Kind: email\nFrom: noel.kowalski\nTo: uli@umber-ventures.example\nAccount: Umber Ventures\nSubject: Following up\n\nHi Uli,\n\nIf the rollout slips past June your team can walk away, no charge. I'll sort it with legal later.\n\nBest,\nNoel",
+  "prompt": "Kind: email\nFrom: wren.holt\nTo: tomas@granite-health.example\nAccount: Granite Health\nSubject: Following up\n\nHi Tomas,\n\nIf adoption stalls, let's set up a success plan call.\n\nBest,\nWren",
   "schema": {
     "additionalProperties": false,
     "properties": {

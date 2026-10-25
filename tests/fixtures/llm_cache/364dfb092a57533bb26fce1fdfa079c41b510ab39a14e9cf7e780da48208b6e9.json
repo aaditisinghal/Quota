@@ -1,13 +1,13 @@
 {
   "model": "claude-opus-5-5",
   "output": {
-    "is_commitment": false,
-    "promised_by": "tatum.garza",
-    "quote": "",
+    "is_commitment": true,
+    "promised_by": "noel.kowalski",
+    "quote": "Throw in the analytics module for free, we'll just not bill it.",
     "to_customer": true,
-    "type": "none"
+    "type": "free_addon"
   },
-  "prompt": "Kind: email\nFrom: tatum.garza\nTo: chloe@onyx-energy.example\nAccount: Onyx Energy\nSubject: Following up\n\nHi Chloe,\n\nCancellation terms are in section 9 of the MSA.\n\nBest,\nTatum",
+  "prompt": "Kind: email\nFrom: noel.kowalski\nTo: quinn@meridian-pharma.example\nAccount: Meridian Pharma\nSubject: Following up\n\nHi Quinn,\n\nThrow in the analytics module for free, we'll just not bill it.\n\nBest,\nNoel",
   "schema": {
     "additionalProperties": false,
     "properties": {

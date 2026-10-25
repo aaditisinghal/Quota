@@ -29,6 +29,8 @@ class Scenario:
     summarize: Callable
     edit: Callable | None = None
     seed: dict = field(default_factory=dict)
+    served: bool = False        # start from the served Acme world (with its cast) instead of a scripted checkpoint
+    messages: list = field(default_factory=list)   # sales messages the scenario adds to the evidence
 
     def card(self) -> dict:
         return {"name": self.name, "phrase": self.phrase, "checkpoint": self.checkpoint, "expect": self.expect}
@@ -52,6 +54,22 @@ def tz_edit(script):
         if event["payload"].get("job") == "commission_run":
             event["payload"]["since"] = "2026-03"
     drop([SCRIPTED_ASK], ["M-0002", "M-0004", "M-0006", "A-0001", "A-0002", "A-0003", "A-0004", "A-0005"])(script)
+
+
+SIDE_LETTER = ("Between us, if your team hasn't adopted it by end of Q3 we'll let you out of year two, no penalty. "
+               "Don't worry about the paperwork.")
+SUMMIT_BILLING = [   # Summit is invoiced and pays before May payroll, so without the hold it is in PR-2026-05
+    ("2026-05-01T18:00:00Z", "invoice.issued", {"stripe_id": "summit-inv-1", "deal_id": "summit",
+                                                "amount_cents": 6_000_000, "date": "2026-05-01"}),
+    ("2026-05-06T17:00:00Z", "payment.received", {"stripe_id": "summit-pay-1", "deal_id": "summit",
+                                                  "amount_cents": 6_000_000, "date": "2026-05-06"}),
+]
+SIDE_LETTER_MESSAGE = {
+    "doc_id": "MSG-SIDE-0001", "kind": "email", "thread_id": "T-SIDE-1", "account": "Summit Dental",
+    "deal_id": "summit", "rep_id": "riley.shah", "author": "riley.shah", "to": ["dana@summit.example"],
+    "channel": None, "sent_at": "2026-05-05T16:10:00Z", "subject": "Re: rollout plan",
+    "body": f"Hi Dana,\n\n{SIDE_LETTER}\n\nBest,\nRiley", "lang": "en", "source_file": "messages.jsonl",
+    "source_row": None}
 
 
 def short_pay_edit(script):
@@ -156,6 +174,22 @@ def summarize_rejects(world, since):
             "trial_balance": {a: tb[a] for a in sorted(tb) if tb[a]}}
 
 
+def summarize_side_letter(world, since):
+    ro = world.ro
+    check = next((d for d in _decisions(ro, "commitment_check") if d["subject_id"] == "summit"), None)
+    lines = [l["id"] for l in queries.fetch_all(ro, "SELECT id FROM commission_lines WHERE deal_id = 'summit' "
+                                                    "AND amount_cents > 0")]
+    payroll = queries.fetch_one(ro, "SELECT * FROM payroll_files WHERE id = 'PR-2026-05'")
+    in_file = [l["line_id"] for l in json.loads(payroll["lines_json"])] if payroll else []
+    finding = json.loads(check["output_json"])["args"]["findings"][0] if check else None
+    return {"held": check["outcome"] if check else None, "decision": check["id"] if check else None,
+            "summit_lines": lines, "in_pr_2026_05": sorted(set(lines) & set(in_file)),
+            "asked": sorted({m["to_principal"] for m in queries.fetch_all(
+                ro, "SELECT to_principal FROM messages WHERE known_at > ? AND text LIKE '%Summit%' AND author = "
+                    "'seat:commissions_analyst'", (since,))}),
+            "evidence": finding and {k: finding[k] for k in ("doc_id", "quote", "type", "sent_at", "retrieval")}}
+
+
 def summarize_short_pay(world, since):
     ro = world.ro
     fyi = _decisions(ro, "short_pay", since)
@@ -203,6 +237,11 @@ SCENARIOS = [
              [("2026-04-29T16:00:00Z", "person", {"who": "priya.nair", "do": "reject", "approval": "A-0002",
                                                   "reason": REJECT_REASON})],
              checkpoints.CHECKPOINTS["cp_end"], summarize_rejects, edit=drop(responses=["A-0002"])),
+    Scenario("side_letter_summit", "Riley promised Summit a free exit by email.", "served",
+             "Riley's Summit line is held out of PR-2026-05 (OFF_CONTRACT_COMMITMENT); the Controller and the VP are "
+             "asked; the evidence card shows the quote",
+             SUMMIT_BILLING, "2026-05-15T18:00:00Z", summarize_side_letter, served=True,
+             messages=[SIDE_LETTER_MESSAGE]),
     Scenario("short_pay_98", "Acme paid $117,600 after wire fees.", "start",
              "98% counts as collected: the commission is released in May payroll, and the $2,400.00 shortfall is an "
              "FYI to AR", [], "2026-05-15T18:00:00Z", summarize_short_pay, edit=short_pay_edit),
@@ -221,6 +260,14 @@ def schedule(world, events) -> None:
 def run(name, directory=checkpoints.DEFAULT_DIR):
     """(demo, result): the world after the scenario, and what the menu shows."""
     scenario = BY_NAME[name]
+    if scenario.served:
+        demo = served_world(scenario.messages)
+        world = demo.world
+        since_feed, since = len(world.feed), world.clock.now()
+        schedule(world, scenario.events)
+        world.run_until(scenario.until)
+        return demo, {**scenario.card(), "clock": world.clock.now(), "timeline": views.timeline(world, since_feed),
+                      "result": scenario.summarize(world, since)}
     checkpoints.ensure_snapshots(directory)
     demo = checkpoints.restore(scenario.checkpoint, scenario.edit, scenario.seed, directory)
     world = demo.world
@@ -232,6 +279,27 @@ def run(name, directory=checkpoints.DEFAULT_DIR):
     world.run_until(scenario.until)
     return demo, {**scenario.card(), "clock": world.clock.now(), "timeline": views.timeline(world, since_feed),
                   "result": scenario.summarize(world, since)}
+
+
+class _Served:
+    """The served Acme world, shaped like a restored demo (`.world`, `.ro`, `.close()`)."""
+
+    def __init__(self, world):
+        self.world = world
+
+    @property
+    def ro(self):
+        return self.world.ro
+
+    def close(self):
+        self.world.close()
+
+
+def served_world(extra_messages=()) -> _Served:
+    from quota.api.session import acme_session, attach_evidence
+    session = acme_session(cast=True)
+    attach_evidence(session.world, extra_messages)
+    return _Served(session.world)
 
 
 def describe(result) -> str:

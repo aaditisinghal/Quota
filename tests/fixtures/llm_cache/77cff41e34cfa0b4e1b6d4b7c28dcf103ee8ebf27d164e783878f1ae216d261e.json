@@ -3,11 +3,11 @@
   "output": {
     "is_commitment": true,
     "promised_by": "alex.chen",
-    "quote": "Si no funciona en 60 d\u00edas, cancelan sin costo.",
+    "quote": "Whatever happens at renewal, you'll stay at this year's number. You have my word.",
     "to_customer": true,
-    "type": "early_exit"
+    "type": "price_lock"
   },
-  "prompt": "Kind: email\nFrom: alex.chen\nTo: ines@basalt-insurance.example\nAccount: Basalt Insurance\nSubject: Re: pr\u00f3ximos pasos\n\nHola Ines,\n\nSi no funciona en 60 d\u00edas, cancelan sin costo. Lo dejamos entre nosotros.\n\nSaludos,\nAlex",
+  "prompt": "Kind: email\nFrom: alex.chen\nTo: ben@onyx-motors.example\nAccount: Onyx Motors\nSubject: Re: order form\n\nHi Ben,\n\nWhatever happens at renewal, you'll stay at this year's number. You have my word.\n\nBest,\nAlex",
   "schema": {
     "additionalProperties": false,
     "properties": {
