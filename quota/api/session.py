@@ -36,8 +36,25 @@ class Session:
         self.restart = restart   # builds this session's start again (POST /demo/reset)
         self.scenario: str | None = None
         self.checkpoint_dir = ".checkpoints"     # R4 snapshots (quota.sim.checkpoints)
+        self.inbox, self.intake, self.provenance = None, None, {}     # R6 (attach_inbox)
         self.lock = threading.RLock()
         world.strict = False     # judges type things: a failing event is logged and contained, never fatal
+
+    def attach_inbox(self, inbox, llm=None) -> dict:
+        """R6: read an inbox (exported from this seed when it is not there yet), keep its intake report and
+        backtest, and index where each fact came from for the trace's source cards."""
+        from pathlib import Path
+
+        from quota.intake import backtest
+        from quota.intake.export import export
+        from quota.intake.intake import Intake
+        if not (Path(inbox) / "_answer_key.json").exists():
+            export(self.seed if self.seed is not None else 7, inbox)
+        intake = Intake(inbox, llm)
+        result = backtest.run(inbox, intake=intake)
+        self.inbox, self.intake = str(inbox), {"report": intake.report_data, "backtest": result}
+        self.provenance = intake.provenance()
+        return self.intake
 
     def swap(self, world, scenario: str | None) -> None:
         """Serve another world from now on (a scenario's, or the start again); the old one is closed."""

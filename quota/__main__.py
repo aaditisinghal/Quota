@@ -97,6 +97,46 @@ def cmd_eval(args) -> int:
     return 0
 
 
+def _model(live):
+    if not live:
+        return None
+    from quota.agent.llm import LLM
+    return LLM()
+
+
+def cmd_export(args) -> int:
+    from quota.intake.export import export
+    key = export(args.seed, args.out, reps=args.reps)
+    print(f"Wrote seed {args.seed}'s exports to {args.out}/ with {len(key['planted'])} planted items "
+          f"({args.out}/_answer_key.json)")
+    return 0
+
+
+def cmd_intake(args) -> int:
+    from quota.intake.intake import Intake
+    _, report = Intake(args.inbox, _model(args.live)).run(args.db)
+    for f in report["files"]:
+        state = "loaded" if f.get("loaded") else "held for review"
+        print(f"  {f['file']:<34} {f['kind'] or '?':<14} {f['rows']:>4} rows  mapping {f.get('mapping_source')}, {state}")
+    print("Loaded: " + ", ".join(f"{n} {t}" for t, n in report["loaded"].items()))
+    for line in report["log"]:
+        print(f"  {line}")
+    print(f"Review items: {len(report['review_items'])}")
+    for item in report["review_items"]:
+        print(f"  {item['id']} {item['kind']} -> {item['routed_to']}: {item['question']}")
+    return 0
+
+
+def cmd_backtest(args) -> int:
+    from quota.intake import backtest
+    result = backtest.run(args.inbox, args.quarter, args.out, _model(args.live))
+    for finding in result["findings"]:
+        print(f"  HELD -> {finding['routed_to']}: {finding['text']}")
+    print(result["headline"])
+    print(f"Written to {args.out}/backtest_{args.quarter}.json")
+    return 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
     from quota.api import session as sessions
@@ -116,6 +156,10 @@ def cmd_serve(args) -> int:
         session = sessions.acme_session("live" if args.live else "scripted", llm, stripe)
     else:
         session = sessions.fernhill_session(args.seed, args.reps, stripe)
+    if args.from_inbox:
+        intake = session.attach_inbox(args.from_inbox, llm)
+        print(f"Inbox {args.from_inbox}: {sum(intake['report']['loaded'].values())} facts with their file and row; "
+              f"{len(intake['report']['review_items'])} review items. {intake['backtest']['headline']}")
     print(f"Clock at {session.world.clock.now()}; serving on http://{args.host}:{args.port}")
     uvicorn.run(create_app(session, runs_dir=args.runs), host=args.host, port=args.port, log_level="warning")
     return 0
@@ -159,6 +203,25 @@ def main(argv=None) -> int:
                           help="run billing in a Stripe sandbox with test clocks (STRIPE_API_KEY; takes minutes)")
     evaluate.set_defaults(fn=cmd_eval)
 
+    exporter = sub.add_parser("export", help="write a seed's world as messy exports with _answer_key.json (R6)")
+    exporter.add_argument("--seed", type=int, default=7)
+    exporter.add_argument("--reps", type=int, default=20)
+    exporter.add_argument("--out", default="inbox")
+    exporter.set_defaults(fn=cmd_export)
+
+    intake = sub.add_parser("intake", help="classify, map, verify and load an inbox of exports (R6)")
+    intake.add_argument("inbox", nargs="?", default="inbox")
+    intake.add_argument("--live", action="store_true", help="propose mappings and read plans with the model")
+    intake.add_argument("--db", help="write the intake ledger to this SQLite file")
+    intake.set_defaults(fn=cmd_intake)
+
+    back = sub.add_parser("backtest", help="recompute a quarter's payout spreadsheet from the inbox (R6)")
+    back.add_argument("--quarter", default="2026Q1")
+    back.add_argument("--inbox", default="inbox")
+    back.add_argument("--out", default="out")
+    back.add_argument("--live", action="store_true")
+    back.set_defaults(fn=cmd_backtest)
+
     serve = sub.add_parser("serve", help="serve the API and screens over one running world")
     serve.add_argument("--world", choices=["acme", "fernhill"], default="acme")
     serve.add_argument("--seed", type=int, default=7, help="fernhill only")
@@ -167,6 +230,8 @@ def main(argv=None) -> int:
                        help="read chat with the model and parse injected text with it (ANTHROPIC_API_KEY)")
     serve.add_argument("--stripe", action="store_true", help="billing in a Stripe sandbox (STRIPE_API_KEY)")
     serve.add_argument("--runs", default="runs", help="where /scorecard finds or writes runs/seed-N/scorecard.json")
+    serve.add_argument("--from-inbox", nargs="?", const="inbox", default=None, dest="from_inbox",
+                       help="attach an inbox (exported from --seed if missing): intake, backtest, source cards")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.set_defaults(fn=cmd_serve)
