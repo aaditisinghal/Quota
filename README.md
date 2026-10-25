@@ -17,7 +17,7 @@ hash-chained ledger that refuses anything breaking an invariant.
 | People (VP, Controller, payroll, reps) | Scripted in the Acme demo, rule-played in the eval, model-played with `--live` | `quota/agent/personas.py`; people act only through the same approval and chat API, with the same write-path capabilities |
 | Models | Claude Opus 5.5 (`claude-opus-5-5`) for extraction, reply wording and `--live` people only | Every extracted number must appear verbatim in its source; replies are checked so every $ amount and date exists in the facts. The eval below uses no model |
 | Planted errors | Simulated, with an answer key | `python -m quota eval --seed N` compares decisions to `answer_key.json` |
-| Screens and API | Real, built here (FastAPI + React) | `python -m quota serve`; the SPEC demo flow was clicked through in a browser (below), and `tests/test_api_actions.py` drives the same flow through the API and gets the scripted books |
+| Screens and API | Real, built here (FastAPI + React) | `python -m quota serve`; the demo flow was clicked through in a browser (below), and `tests/test_api_actions.py` drives the same flow through the API and gets the scripted books |
 
 ## Scorecard (measured)
 
@@ -63,7 +63,7 @@ column.
 - Seed 1729 was chosen by the builder, not hidden by a teammate.
 - Straight-through counts lines approved or paid with no hold, escalation or dispute; the Controller's routine
   approval of accrual and payroll batches is not counted as a human touch.
-- Not built: manager overrides and the 1350/1450 current vs noncurrent split (both on SPEC's cut list). The
+- Not built: manager overrides and the 1350/1450 current vs noncurrent split (both deliberately cut for scope). The
   "attack your own controls" exercise is below, run as tests rather than by a separate agent.
 
 ## Policy anchored in public filings
@@ -74,7 +74,7 @@ EDGAR; paraphrased):
 | Filing | What it discloses | Where Fernhill follows it |
 | --- | --- | --- |
 | [Snowflake 10-K, fiscal 2025](https://www.sec.gov/Archives/edgar/data/1640147/000164014725000052/snow-20250131.htm) | Commissions on new or expanded contracts that are commensurate with renewal commissions are capitalized and amortized over the contracts' weighted-average term; those that are not commensurate, over a five-year benefit period | Fernhill's renewal commissions are commensurate, so the benefit period is the contract term (Acme: 36 x $500) |
-| [Amplitude 10-K, fiscal 2024](https://www.sec.gov/Archives/edgar/data/1866692/000095017025024135/ampl-20241231.htm) | Initial-contract commissions amortized straight-line over five years because renewal commissions are not commensurate; the next 12 months' amortization is shown as current, the rest noncurrent | The alternative when renewals are not commensurate; SPEC's 1350 (current) / 1450 (noncurrent) split comes from the same practice (cut here) |
+| [Amplitude 10-K, fiscal 2024](https://www.sec.gov/Archives/edgar/data/1866692/000095017025024135/ampl-20241231.htm) | Initial-contract commissions amortized straight-line over five years because renewal commissions are not commensurate; the next 12 months' amortization is shown as current, the rest noncurrent | The alternative when renewals are not commensurate; a 1350 (current) / 1450 (noncurrent) split follows the same practice (cut here) |
 | [DocuSign 10-K, fiscal 2024](https://www.sec.gov/Archives/edgar/data/1261333/000126133324000045/docu-20240131.htm) | Incremental sales commissions capitalized and amortized straight-line over the period of benefit, five years for initial contracts, since renewal commissions are not commensurate | Capitalize only commissions incremental to winning a contract; straight-line amortization |
 
 ## Screens
@@ -160,8 +160,7 @@ routine approvals come 30 minutes after a request, so April's $500 amortization 
 
 ## Scope: what Quota owns, and when it asks
 
-Quota owns one object, the commission line, from signed contract to paid paycheck to booked expense (SPEC
-"Scope"; the sales pitch is in `docs/PITCH.md`). What each function gets from it, as built:
+Quota owns one object, the commission line, from signed contract to paid paycheck to booked expense. What each function gets from it, as built:
 
 | Function | Quota produces | Where to see it |
 | --- | --- | --- |
@@ -182,14 +181,14 @@ The escalation contract, case by case:
 | 7 | A person must sign | Every seat-drafted entry, payout file and period lock |
 | 8 | Its own checks fail | Before every payroll Quota runs all invariants and the chain; on a failure nothing is paid and the Controller is told |
 
-## Pressure test against SPEC.md
+## Pressure test against the spec
 
-Every behaviour SPEC.md promises was checked against the running build, through the HTTP API and in a browser.
+Every behaviour the design spec promises was checked against the running build, through the HTTP API and in a browser.
 What broke, and is now fixed with a regression test (`tests/test_spec_pressure.py`, `tests/test_controls.py`):
 
 | Found | Fix |
 | --- | --- |
-| 6 of the 8 rehearsed judge phrases did not map (CFO / Taylor, Alex's split, Riley's backdate, Controller on vacation, approve your own payout) or were refused (Acme never pays) | All 8 map to SPEC's events. The served world now has SPEC's named cast: Alex Chen (Orbit, split 60/40 with Riley), Riley Shah (Summit), Taylor Brooks (Vale, CA, leaves May 8 before Vale pays), and a CFO, Grace Liu |
+| 6 of the 8 rehearsed judge phrases did not map (CFO / Taylor, Alex's split, Riley's backdate, Controller on vacation, approve your own payout) or were refused (Acme never pays) | All 8 map to the spec's events. The served world now has the spec's named cast: Alex Chen (Orbit, split 60/40 with Riley), Riley Shah (Summit), Taylor Brooks (Vale, CA, leaves May 8 before Vale pays), and a CFO, Grace Liu |
 | Deals with no signed contract were commissioned on the CRM close date and amount alone | No signed contract, no booking (CRM fields are never trusted alone) |
 | "Approve your own payout" in chat got a clarifying question | The seat attempts it; the write path refuses (`NO_CAPABILITY, INV5_NOT_APPROVED`) and the reply names who can approve |
 | An ambiguous reply ("sounds good, let's discuss") to an open question was ignored | Treated as no answer: one clarifying question per open item |
@@ -199,7 +198,7 @@ What broke, and is now fixed with a regression test (`tests/test_spec_pressure.p
 | A split edited to 110% after booking was not noticed | `splits_check` on every CRM split edit: lines held out of payroll, VP asked with the last split that added up |
 | Credit on a deal held for a bad split counted toward attainment | Held credit counts toward nobody's quota until the split is fixed |
 | An overdue notice on a customer billing shows as paid created a collection hold | Billing decides payment status: `collection_check`, no hold, with the payment's id |
-| SPEC's invariant 3 (subledgers tie to the GL) was only a screen | `INV3` is checked with the others (`verify`, the demo report, Ledger health): eight invariants |
+| The spec's invariant 3 (subledgers tie to the GL) was only a screen | `INV3` is checked with the others (`verify`, the demo report, Ledger health): eight invariants |
 | One bad injected event (an unknown deal) crashed the seat and every later request (HTTP 500) | The injector validates ids, amounts, dates and the plan-year horizon; a served world logs any failing event as ERROR and moves on |
 | `/trace?as_of=garbage` was read as the far future; chat could message nobody | Both refused with 422 |
 
@@ -271,5 +270,3 @@ python -m quota eval --seed 7
   (write a ledger with `demo acme --db PATH`).
 - `pytest -q`: the test suite.
 
-`IMPLEMENTATION.md` is the build contract, `SPEC.md` the why, and `ASSUMPTIONS.md` every choice made where they
-were silent.
