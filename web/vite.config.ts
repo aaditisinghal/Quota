@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 // where FastAPI serves it at /.
 const api = "http://127.0.0.1:8000";
 const paths = [
-  "/state", "/timeline", "/trace", "/ledger", "/today", "/scorecard", "/messages", "/statement", "/chat", "/inject",
+  "/state", "/architecture", "/timeline", "/trace", "/ledger", "/today", "/scorecard", "/messages", "/statement", "/chat", "/inject",
   "/scenarios", "/demo", "/intake", "/review", "/api",
   "/home", "/sources", "/reps", "/contracts", "/lines", "/needs-you", "/elastic", "/auditor",
 ];

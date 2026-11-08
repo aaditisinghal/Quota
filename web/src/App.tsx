@@ -4,6 +4,7 @@ import { CaseView, caseLineFor, type CaseFollow } from "./Case";
 import { ChatPane } from "./ChatPane";
 import { HomeView } from "./Home";
 import { InjectScore } from "./InjectScore";
+import { HowItWorks } from "./HowItWorks";
 import { IntakeView } from "./Intake";
 import { Presenter } from "./Presenter";
 import { RepView, RepsBoard } from "./Reps";
@@ -14,7 +15,7 @@ import { TraceView } from "./TraceView";
 import { When, learnAccountsFromText, setWorldYear, usd } from "./format";
 import "./cfo.css";
 
-type Tab = "home" | "case" | "reps" | "trace" | "chat" | "today" | "inject" | "intake";
+type Tab = "home" | "case" | "reps" | "trace" | "chat" | "today" | "inject" | "intake" | "how";
 const TABS: [Tab, string][] = [
   ["home", "Home"],
   ["case", "Case"],
@@ -24,15 +25,16 @@ const TABS: [Tab, string][] = [
   ["today", "Today + Ledger health"],
   ["inject", "Inject + Scorecard"],
   ["intake", "Intake"],
+  ["how", "How it works"],
 ];
 // The source systems themselves, opened in a new tab: the HR clone seeded with Quota's roster (CUA_TASKS C1)
 // and the Stripe test sandbox with the Orbit split's Connect transfer (C6).
 const EXTERNAL: [string, string, string][] = [
   ["BambooHR", "http://127.0.0.1:8080/employees/directory.php", "The HR clone with Quota's people (run start-clone.cmd)"],
-  ["Stripe sandbox", "https://dashboard.stripe.com/acct_1UTwgbGDis24t23a/test/connect/accounts/overview", "Stripe test mode: connected partners and transfers"],
+  ["Stripe sandbox", "https://dashboard.stripe.com/acct_1UU5SyFAv5p0T8Xa/test/connect/accounts/overview", "Stripe test mode: connected partners and transfers"],
 ];
 // The CFO screens and the Case tab use the whole width; the others keep the Timeline on the right.
-const WIDE: Tab[] = ["home", "case", "reps"];
+const WIDE: Tab[] = ["home", "case", "reps", "how"];
 
 /**
  * Where the hash points. `id` is the case line, the trace target, or the rep (on `reps`, null for the board);
@@ -326,6 +328,7 @@ export function App() {
                       version={version} onChange={update} />
           )}
           {tab === "today" && <TodayHealth version={version} people={people} />}
+          {tab === "how" && <HowItWorks version={version} />}
           {tab === "intake" && <IntakeView people={people} version={version} onChange={update} />}
           {tab === "inject" && state && (
             <InjectScore clock={state.clock} people={people} world={state.world} seed={state.seed} onChange={update} />

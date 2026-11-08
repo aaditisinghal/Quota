@@ -451,7 +451,27 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
 
 const seg = encodeURIComponent;
 
+export type Architecture = {
+  clock: string;
+  tables: Record<string, number>;
+  table_groups: Record<string, string[]>;
+  events_by_type: Record<string, number>;
+  events_waiting: number;
+  event_status: Record<string, number>;
+  decisions_by_kind: Record<string, number>;
+  decisions_by_outcome: Record<string, number>;
+  decisions_with_model: number;
+  refusals_by_code: Record<string, number>;
+  line_statuses: Record<string, number>;
+  approvals: { pending: number; decided: number };
+  entries_by_status: Record<string, number>;
+  invariants_ok: Record<string, boolean>;
+  people: { id: string; name: string; title: string; kind: string; limit_cents: number | null; capabilities: string[] }[];
+  evidence_docs: number;
+};
+
 export const api = {
+  architecture: () => call<Architecture>("/architecture"),
   home: () => call<Home>("/home"),
   sources: () => call<Source[]>("/sources"),
   sourceRows: (kind: string, q: string) => call<SourceRows>(`/sources/${seg(kind)}/rows${q ? `?q=${seg(q)}` : ""}`),

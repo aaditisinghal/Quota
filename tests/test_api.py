@@ -155,3 +155,13 @@ def test_deal_and_account_traces(finished):
     assert account["account:1290"]["amount_cents"] == 1_800_000 and "JE-0012" in account
     april = finished.get("/trace/account/1350?as_of=2026-04-30T23:59:00Z").json()["nodes"][0]
     assert april["amount_cents"] == 1_800_000 - 50_000                    # accrual less April's amortization
+
+
+def test_architecture_counts_every_table_and_the_live_state(finished):
+    a = finished.get("/architecture").json()
+    assert len(a["tables"]) == 24 and a["tables"]["chain"] > 0
+    assert sum(len(names) for names in a["table_groups"].values()) == 24
+    assert a["invariants_ok"] == {f"INV{i}": True for i in range(1, 9)}
+    assert a["refusals_by_code"]["NO_CAPABILITY"] >= 1                 # the seat's own approval attempt
+    assert a["decisions_by_kind"]["commission_calc"] >= 1 and a["events_by_type"]["customer.churned"] == 1
+    assert {"jordan.kim", "seat:commissions_analyst"} <= {p["id"] for p in a["people"]}
