@@ -1,0 +1,40 @@
+% Shared palette and styles for the Quota diagrams.
+\usepackage{tikz}
+\usepackage[T1]{fontenc}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usetikzlibrary{positioning,fit,backgrounds,arrows.meta,calc,shapes.geometric,shapes.symbols,decorations.pathreplacing,patterns}
+
+\definecolor{qink}{HTML}{14110E}
+\definecolor{qorange}{HTML}{E05A28}
+\definecolor{qorangelt}{HTML}{FBE7DC}
+\definecolor{qcream}{HTML}{FBF7F1}
+\definecolor{qgrey}{HTML}{6B6560}
+\definecolor{qline}{HTML}{C9C2B8}
+\definecolor{qblue}{HTML}{1F5F8B}
+\definecolor{qbluelt}{HTML}{DCE8F1}
+\definecolor{qgreen}{HTML}{2F6B4F}
+\definecolor{qgreenlt}{HTML}{DEEBE3}
+\definecolor{qpaper}{HTML}{FFFFFF}
+
+\tikzset{
+  box/.style   = {rounded corners=2pt, draw=qline, line width=0.5pt, fill=qpaper,
+                  align=center, inner sep=4pt, font=\scriptsize, text=qink},
+  src/.style   = {box, minimum height=12mm, text width=25mm},
+  proc/.style  = {box, minimum height=10mm, text width=30mm},
+  gate/.style  = {box, draw=qorange, line width=1pt, fill=qorangelt},
+  store/.style = {box, draw=qink, line width=0.8pt, fill=qcream},
+  elas/.style  = {box, draw=qblue, line width=0.7pt, fill=qbluelt},
+  human/.style = {box, draw=qgreen, line width=0.7pt, fill=qgreenlt},
+  band/.style  = {font=\scriptsize\bfseries, text=qgrey, anchor=east, align=right},
+  tag/.style   = {font=\tiny, text=qgrey, align=center, inner sep=1pt},
+  ttl/.style   = {font=\scriptsize\bfseries, text=qink},
+  flow/.style  = {-{Stealth[length=4pt,width=3pt]}, draw=qgrey, line width=0.7pt},
+  flowo/.style = {-{Stealth[length=4pt,width=3pt]}, draw=qorange, line width=1pt},
+  flowb/.style = {-{Stealth[length=4pt,width=3pt]}, draw=qblue, line width=0.9pt},
+  flowg/.style = {-{Stealth[length=4pt,width=3pt]}, draw=qgreen, line width=0.9pt},
+  dash/.style  = {draw=qline, line width=0.5pt, dash pattern=on 2pt off 2pt},
+  grp/.style   = {rounded corners=3pt, draw=qline, line width=0.5pt, fill=qcream, inner sep=5pt},
+}
+\newcommand{\bb}[1]{\textbf{#1}}
+\newcommand{\gy}[1]{{\color{qgrey}#1}}
