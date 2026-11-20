@@ -13,9 +13,8 @@
 runs
 inbox
 out
-tests
+tests/*
+!tests/fixtures
 docs
-plans
-elastic
 integrations
 web

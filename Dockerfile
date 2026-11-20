@@ -23,6 +23,10 @@ RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml
 # Run from source in /app: the code resolves .env and .llm_cache relative to the repo root,
 # which keeps them in a directory the unprivileged user can write.
 COPY quota ./quota
+# Data the code reads by repo-relative path: the signed plan (Acme seed), dispute fixtures (eval), Elastic workflow.
+COPY plans ./plans
+COPY elastic ./elastic
+COPY tests/fixtures ./tests/fixtures
 RUN useradd --create-home --uid 10001 quota && chown -R quota:quota /app
 USER quota
 
