@@ -1,5 +1,6 @@
 """Answers to chat messages that are not a claim: a question ("why is my Acme commission $12,000?"), a check
-("does this actually work?"), or small talk. The analyst replies to every message.
+("does this actually work?"), or small talk. The analyst replies to every typed message except a bare
+acknowledgment ("ok", "Thanks!"), which ends the exchange.
 
 The model (claude-sonnet-5, or QUOTA_CHAT_MODEL) writes the answer from the facts it is given: the person's own
 commission lines, holds, what waits on them, the signed plan's terms, the recent conversation, and a company
@@ -21,6 +22,18 @@ from quota.money import fmt_usd
 
 QUESTION = ("what", "why", "how", "when", "where", "who", "which", "can", "could", "does", "do", "is", "are",
             "will", "should", "tell", "explain", "show")
+
+
+ACKNOWLEDGMENTS = {"ok", "okay", "k", "kk", "got it", "noted", "cool", "great", "perfect", "sounds good", "will do",
+                   "understood", "sure", "nice", "awesome", "np", "no problem", "thanks", "thank you", "thx", "ty",
+                   "thanks so much", "thank you so much", "thanks a lot", "many thanks", "ok thanks", "okay thanks",
+                   "ok thank you", "got it thanks", "great thanks", "perfect thanks", "cheers"}
+
+
+def is_acknowledgment(text: str) -> bool:
+    """A bare 'ok' or 'Thanks!' closes a turn; replying to it would only invite another one."""
+    words = "".join(c if c.isalnum() or c.isspace() else " " for c in text.lower()).split()
+    return " ".join(words) in ACKNOWLEDGMENTS
 
 
 def is_question(text: str) -> bool:
