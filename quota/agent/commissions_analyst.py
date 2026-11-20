@@ -643,6 +643,8 @@ class CommissionsAnalyst(Seat):
         message = ctx.data["message"]
         if message["id"] not in self.answer_ids:
             return []               # scripted or persona small talk stays unanswered, so replays and ids hold
+        if answer.is_acknowledgment(message["text"]):
+            return []               # "ok" / "Thanks!" ends the exchange; questions and greetings still get answers
         reply = answer.answer(self.llm, message["text"], answer.facts_for(self, message["author"]))
         self.send(message["author"], reply, "REPLY")
         return []

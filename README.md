@@ -1,5 +1,7 @@
 # <img src="docs/logo.png" alt="" width="36" height="36" align="center" /> Quota
 
+[![ci](https://github.com/aaditisinghal/Quota/actions/workflows/ci.yml/badge.svg)](https://github.com/aaditisinghal/Quota/actions/workflows/ci.yml)
+
 An agent-run commissions desk for a simulated SaaS company. Two seats (a commissions analyst and a
 deferred-commission accountant) pick events off their own queues, read sources through a read-only connection,
 let models read words while code decides dollars, and write through a single write path into an append-only,
@@ -269,4 +271,27 @@ python -m quota eval --seed 7
 - `python -m quota verify|replay|tb --db PATH`: chain and invariants, decision replay, trial balance as of a time
   (write a ledger with `demo acme --db PATH`).
 - `pytest -q`: the test suite.
+
+### With Docker
+
+```bash
+docker build -t quota .
+docker run --rm -p 8000:8000 quota                      # serves the Acme world on http://localhost:8000
+docker run --rm -p 8000:8000 quota --world fernhill --seed 7
+```
+
+The container runs as a non-root user, and its `HEALTHCHECK` reports healthy only when `/ledger/health` shows the
+hash chain and every invariant intact, not just when the port is open. Pass `--env-file .env` and add `--live` or
+`--stripe` for model or Stripe sandbox runs.
+
+### CI
+
+Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+- **tests:** `pytest` on Python 3.11 and 3.13, with no network (Elastic, Stripe and model suites stay opt-in).
+- **ledger integrity + eval gate:** runs the Acme demo into a ledger file, then `verify` (chain plus all
+  invariants) and `replay` of recorded decisions. It then runs `eval --seed 7` and fails the build unless recall
+  is 100%, false flags and wrong automatic payouts are 0, and replay match is 100%. The scorecard is uploaded as
+  a build artifact.
+- **docker:** builds the image, boots it, and waits for `/ledger/health` to report every invariant OK.
 
