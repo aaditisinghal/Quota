@@ -23,36 +23,44 @@ hash-chained ledger that refuses anything breaking an invariant.
 
 ## Scorecard (measured)
 
-`python -m quota eval --seed 7` and `--seed 1729`; 20 reps, January to June 2026, ~245 deals, ~1,500 events,
-40 planted cases of 16 error types. A case counts only when both the outcome and the dollar amount match the key.
+`python -m quota eval --seed 7` and `--seed 1729`; 20 reps, January to June 2026, ~240 deals, ~1,700 events,
+52 planted cases of 17 error types: 40 cases of E01-E16, plus 12 off-contract promises (E17) hidden among decoy
+messages in the sales chat. A case counts only when both the outcome and the dollar amount match the key.
 
-| Metric | Seed 7 (development) | Seed 1729 (held-out, first run) | Seed 1729 after the key fix |
-| --- | --- | --- | --- |
-| Planted-error recall | 40 / 40 (100%) | 39 / 40 (97.5%) | 40 / 40 (100%) |
-| False flags | 0 | 0 | 0 |
-| Wrong automatic payouts | 0 | 0 | 0 |
-| Pushback test (20 scripted disputes) | held 10/10 invalid, conceded 10/10 valid | same | same |
-| Straight-through rate | 94.7% | 94.9% | 94.9% |
-| Escalations per 100 events | 0.7 | 0.7 | 0.7 |
-| Replay match | 100% (554 decisions) | 100% (580 decisions) | 100% |
-| Write-path refusals | 2, both INV6_PAYROLL_MISMATCH (the two planted payroll-export edits) | 2, same | 2, same |
+| Metric | Seed 7 (development) | Seed 1729 (held-out) |
+| --- | --- | --- |
+| Planted-error recall | 52 / 52 (100%) | 52 / 52 (100%) |
+| False flags | 0 | 0 |
+| Wrong automatic payouts | 0 | 0 |
+| Pushback test (20 scripted disputes) | held 10/10 invalid, conceded 10/10 valid | same |
+| Straight-through rate | 90.2% | 90.6% |
+| Escalations per 100 events | 0.8 | 0.9 |
+| Replay match | 100% (570 decisions) | 100% (597 decisions) |
+| Write-path refusals | 2, both INV6_PAYROLL_MISMATCH (the two planted payroll-export edits) | 2, same |
+| Confidence separation | 15/49 planted-error lines < 70; 163/215 clean lines >= 90 | 15/49; 144/228 |
 
-**With real Stripe billing.** `python -m quota eval --seed 7 --stripe` reproduced the seed-7 column exactly
+Measured on the current code (241 deals and 1,698 events for seed 7; 238 and 1,694 for seed 1729). The E17
+promises are held by design until the Controller and the VP decide them, so they count against straight-through;
+on the earlier 40-case set it was 94.7% (seed 7) and 94.9% (seed 1729). CI reruns seed 7 on every push and fails
+the build unless recall and replay match stay at 100% with 0 false flags and 0 wrong payouts.
+
+**With real Stripe billing** (measured on the earlier 40-case set, before E17; not rerun since, because it needs a
+Stripe sandbox key). `python -m quota eval --seed 7 --stripe` reproduced the seed-7 results exactly
 (40/40, 0 false flags, 0 wrong payouts, pushback 10/10 and 10/10, 94.7% straight-through, 100% replay) while
 billing ran in a Stripe sandbox. It created 81 test clocks, 241 customers and invoices, 210 card payments and 3
 refunds. Stripe's own search confirms 241 invoices for the run (210 paid, 31 still open at June 30, including the
 planted 120-days-late customers) and 3 succeeded refunds totalling $214,916.66, and all 454 billing rows carry
 Stripe ids. It takes about 26 minutes, because every test-clock advance waits for Stripe.
 
-**Misses.** Held-out seed 1729, first run: **E09-0001** (expected `posted`, got `held`; amount right). The miss was
-in the answer key, not in Quota. The E09 plant made the departing rep's own deals collected before the
+**Misses.** None on the current set. History: the first held-out run of seed 1729 (40-case set) missed
+**E09-0001** (expected `posted`, got `held`; amount right). The miss was in the answer key, not in Quota. The E09 plant made the departing rep's own deals collected before the
 termination date but missed a 30% split the rep held on another rep's deal, which was never collected. Quota held
 that line, as the signed plan says (only lines booked and collected before the end date are paid), so the rep's
-termination review came back `held`. The plant was fixed to cover split partners, and the rerun is in the last
-column.
+termination review came back `held`. The plant was fixed to cover split partners, and the
+rerun scored 40/40.
 
 **What this scorecard does and does not show.**
-- The 16 error types and Quota's handling of them were built in the same phase; the held-out seed tests a new
+- The 17 error types and Quota's handling of them were built in the same phase; the held-out seed tests a new
   arrangement of the same kinds of error, not unseen kinds.
 - Expected amounts are priced by the same calculator Quota uses, on the generator's ground-truth facts. The
   amount check therefore tests policy (what gets booked, held, corrected or recovered), not arithmetic; the
@@ -217,7 +225,7 @@ The control tests try each forbidden action (seats or reps approving, the VP ove
 second decisions, posting into a locked period, lines without decisions or with bad splits, payroll edits, raw
 edits to a past row) and require a refusal with its reason code, then check that the books still pass every
 invariant, every decision replays, and no as-of trace shows anything known later. After all fixes the eval is
-unchanged: seed 7 and seed 1729 both 40/40, 0 false flags, 0 wrong payouts.
+unchanged: seed 7 and seed 1729 both catch every planted case (now 52/52), with 0 false flags and 0 wrong payouts.
 
 ## Planted errors and what Quota does
 
@@ -239,6 +247,7 @@ unchanged: seed 7 and seed 1729 both 40/40, 0 false flags, 0 wrong payouts.
 | E14 | Unsigned plan draft differs from the signed plan | Pays on the signed plan; flags the drift to the VP | escalated |
 | E15 | Deal voided after payout | Full recovery in the open period, linked to the original line | corrected |
 | E16 | Payroll export differs from approved lines by $340 | Write path refuses the release and names the line | blocked |
+| E17 | Off-contract commitment promised in sales messages (12 per seed, mixed with decoys that are not promises) | Held; the Controller and the VP are asked; never paid while held | held |
 
 ## Run it
 
